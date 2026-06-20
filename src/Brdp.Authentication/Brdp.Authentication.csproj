@@ -13,12 +13,12 @@
 
   <ItemGroup>
     <!-- Redis -->
-    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
+    <PackageReference Include="StackExchange.Redis" Version="2.12.8" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
 
-    <!-- JWT -->
-    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.9.0" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.9.0" />
+    <!-- JWT — IdentityModel 8.x: Active release, tied to .NET 9/10 lifecycle (~Nov 2028) -->
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.17.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.17.0" />
 
     <!-- ASP.NET Core integration (for middleware, controllers) -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
@@ -36,7 +36,7 @@
     <!-- Data Protection (encryption at rest) -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.0" />
 
-    <!-- JSON -->
+    <!-- JSON — inbox in net10, explicit ref ensures no transitive downgrade -->
     <PackageReference Include="System.Text.Json" Version="10.0.0" />
   </ItemGroup>
 

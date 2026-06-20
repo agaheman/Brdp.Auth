@@ -69,7 +69,7 @@ Controllers / Services          ← inject IAuthenticatedUserContextAccessor, ca
 ```
 SPA → GET /auth/login
     → OIDC challenge → TPS SSO
-    → GET /auth/callback
+    → GET /auth/signin-callback
         → Extract SSO tokens
         → Save Redis session (TTL = RefreshTokenExpiry)
         → Issue BrdpToken (expiry = SsoAccessTokenExpiry)
@@ -107,10 +107,20 @@ SPA → POST /auth/logout
     → Read session from Redis
     → Revoke SsoAccessToken at SSO
     → Delete Redis session
-    → Sign out OIDC cookie
-    → 200 OK
+    → SignOut (Cookie + OIDC) → redirect to SSO global signout
+    → SSO redirects back → GET /auth/signout-callback → { signedOut: true }
 SPA removes BrdpToken → redirects to login
 ```
+
+### Route Map
+| Method | Route                    | Auth      | Description                        |
+|--------|--------------------------|-----------|------------------------------------|
+| GET    | /auth/login              | Anonymous | Initiates OIDC challenge           |
+| GET    | /auth/signin-callback    | Anonymous | OIDC callback — issues BrdpToken   |
+| GET    | /auth/me                 | Required  | Current user identity              |
+| POST   | /auth/refresh            | Anonymous | Explicit BrdpToken refresh         |
+| POST   | /auth/logout             | Required  | Revoke + delete session + sign out |
+| GET    | /auth/signout-callback   | Anonymous | Post-SSO-signout landing           |
 
 ---
 

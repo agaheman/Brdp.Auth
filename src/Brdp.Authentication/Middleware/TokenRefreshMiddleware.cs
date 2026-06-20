@@ -38,11 +38,12 @@ public sealed class TokenRefreshMiddleware
     private static readonly HashSet<string> _skipPaths =
     [
         "/auth/login",
-        "/auth/logout",
-        "/signin-oidc",
-        "/signout-callback-oidc",
+        "/auth/signin-callback",
+        "/auth/signout-callback",
+        "/auth/refresh",          // avoid recursion — this endpoint handles its own expired tokens
+        "/signin-oidc",           // ASP.NET Core OIDC middleware internal callback
+        "/signout-callback-oidc", // ASP.NET Core OIDC middleware internal signout
         "/health",
-        "/auth/refresh",   // avoid recursion
     ];
 
     public TokenRefreshMiddleware(
