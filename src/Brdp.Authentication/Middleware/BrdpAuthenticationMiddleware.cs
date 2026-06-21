@@ -74,11 +74,11 @@ public sealed class BrdpAuthenticationMiddleware
             return;
         }
 
-        // ── Step 2: Validate signature (expiry may be skipped by refresh middleware) ──
-        // At this stage we use ValidateIgnoringExpiry so that the refresh middleware
-        // (which runs before this one in the pipeline) has already replaced the token
-        // in the Authorization header if it was expired. If the refresh middleware is
-        // NOT registered, expired tokens will correctly fail here.
+        // ── Step 2: Validate signature AND expiry ─────────────────────────────
+        // We use the full Validate (expiry enforced). TokenRefreshMiddleware runs
+        // earlier in the pipeline and has already swapped an expired/near-expiry token
+        // for a fresh one in the Authorization header. If that middleware is NOT
+        // registered, expired tokens correctly fail here.
         var claims = _brdpTokens.Validate(token);
         if (claims is null)
         {
@@ -114,10 +114,23 @@ public sealed class BrdpAuthenticationMiddleware
         // ── Step 5: Populate accessor — available to all downstream DI ────────
         accessor.Context = AuthenticatedUserContext.FromSession(session);
 
-        _logger.LogDebug(
-            "User {Username} authenticated for {Path}.", claims.Username, context.Request.Path);
+        // ── Step 6: Enrich the logging scope with the session identity ────────
+        // Adds Username + SessionId to every downstream log line. Combined with the
+        // CorrelationId from CorrelationMiddleware, this lets a complete authentication
+        // flow be reconstructed across separate requests (login → … → logout) by
+        // filtering on SessionId, even across OIDC browser redirects.
+        using (_logger.BeginScope(new Dictionary<string, object>
+        {
+            ["Username"]  = session.Username,
+            ["UserCode"]  = session.UserCode,
+            ["SessionId"] = session.SessionId,
+        }))
+        {
+            _logger.LogDebug(
+                "User {Username} authenticated for {Path}.", claims.Username, context.Request.Path);
 
-        await _next(context).ConfigureAwait(false);
+            await _next(context).ConfigureAwait(false);
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

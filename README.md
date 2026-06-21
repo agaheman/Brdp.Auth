@@ -1,206 +1,115 @@
 # Brdp.Authentication
 
-BFF (Backend For Frontend) Authentication Library for BrdpApiGateway.
+BFF (Backend-For-Frontend) authentication library for **BrdpApiGateway**.
 
-Built with **.NET 10 / C# 14** · Redis · OIDC (TPS SSO)
+Built with **.NET 10 / C# 14** · Redis · OIDC (TPS SSO).
+
+The SPA never holds SSO tokens — it holds only a short-lived **BrdpToken** (HS256 JWT).
+The gateway keeps the SSO tokens in Redis, which is the **session source of truth**:
+deleting a key logs the user out immediately, even while the BrdpToken is still valid.
 
 ---
 
-## Solution Structure
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | BFF pattern, pipeline, components, concurrency, resilience |
+| [docs/SPECS.md](docs/SPECS.md) | HTTP surface, flows, tokens, invariants, configuration, logging |
+| [docs/USAGE.md](docs/USAGE.md) | Host registration, configuration, SPA integration, operations |
+| [docs/PLAN.md](docs/PLAN.md) | What's done, what's open, roadmap |
+| [CLAUDE.md](CLAUDE.md) | Repository guide & conventions |
+
+---
+
+## Solution structure
 
 ```
 Brdp.Authentication.sln
-│
-├── src/
-│   ├── Brdp.Authentication/              ← Class library (all auth logic)
-│   │   ├── Abstractions/                 ← Interfaces (IAuthenticatedUserContext, etc.)
-│   │   ├── Models/                       ← RedisSession, BrdpTokenClaims, etc.
-│   │   ├── Configuration/                ← AuthenticationOptions, SsoAuthenticationOptions
-│   │   ├── Services/                     ← SessionService, BrdpTokenService, BranchService, …
-│   │   ├── Infrastructure/               ← RedisSessionStore, SsoHttpClient, RedisKeyHelper
-│   │   ├── Middleware/                   ← BrdpAuthenticationMiddleware, TokenRefreshMiddleware
-│   │   ├── Controllers/                  ← AuthController, BranchController, SessionController
-│   │   ├── Security/                     ← NoOpTokenEncryptionService, DataProtectionEncryptionService
-│   │   └── Extensions/                   ← ServiceCollectionExtensions, ApplicationBuilderExtensions
-│   │
-│   └── Brdp.Authentication.Api/          ← ASP.NET Core host (Program.cs, appsettings.json)
-│
-└── tests/
-    └── Brdp.Authentication.Tests/        ← xUnit · Moq · FluentAssertions
+└── src/
+    ├── Brdp.Authentication/            ← class library (all auth logic)
+    │   ├── Abstractions/   interfaces (IAuthenticatedUserContext, ISessionService, …)
+    │   ├── Configuration/  options, constants, scheme names
+    │   ├── Controllers/    AuthController, BranchController, SessionController
+    │   ├── Extensions/     AddBrdpAuthentication (DI) + UseBrdpAuthentication (pipeline)
+    │   ├── Infrastructure/ RedisSessionStore, SsoHttpClient, RedisKeyHelper
+    │   ├── Middleware/     Correlation → TokenRefresh → BrdpAuthentication
+    │   ├── Models/         RedisSession, BrdpTokenClaims, SsoTokenResponse, …
+    │   ├── Security/       DataProtection / NoOp token encryption
+    │   └── Services/       SessionService, BrdpTokenService, BranchService, SsoTokenService
+    │
+    └── Brdp.Authentication.Api/        ← ASP.NET Core host (Program.cs, appsettings.json)
 ```
 
 ---
 
-## Key Design Decisions
-
-| Decision | Detail |
-|---|---|
-| **SPA never sees SSO tokens** | SPA holds BrdpToken only; gateway holds SsoAccessToken + SsoRefreshToken in Redis |
-| **IAuthenticatedUserContextAccessor (Scoped)** | Replaces `HttpContext.Items["UserContext"]`; services inject it directly, no HttpContext coupling |
-| **Redis is Session Source of Truth** | Deleting a Redis key immediately invalidates user, even if BrdpToken is still valid |
-| **Single Redis lookup per request** | Auth middleware reads session once; all downstream services use the populated accessor |
-| **Expiry alignment** | `Expiry(BrdpToken) == Expiry(SsoAccessToken)` — no repeated SSO token parsing |
-| **Redis TTL = RefreshToken expiry** | Session survives AccessToken rotation |
-| **Dual refresh triggers** | Reactive (expired) + proactive (remaining < threshold) |
-| **EncryptTokensAtRest** | ASP.NET Core Data Protection — active in production |
-
----
-
-## Middleware Pipeline Order
-
-```
-Request
-  │
-  ▼
-TokenRefreshMiddleware          ← rotates token if expired or near expiry
-  │
-  ▼
-BrdpAuthenticationMiddleware    ← validates signature + Redis session + populates IAuthenticatedUserContextAccessor
-  │
-  ▼
-Controllers / Services          ← inject IAuthenticatedUserContextAccessor, call .GetRequiredContext()
-```
-
----
-
-## Authentication Flows
-
-### Login
-```
-SPA → GET /auth/login
-    → OIDC challenge → TPS SSO
-    → GET /auth/signin-callback
-        → Extract SSO tokens
-        → Save Redis session (TTL = RefreshTokenExpiry)
-        → Issue BrdpToken (expiry = SsoAccessTokenExpiry)
-        → Return { token, isBranchUser, expiresAt }
-```
-
-### Branch Selection (branch users only)
-```
-SPA → POST /branch/select { branchCode }
-    → BranchService.SelectBranchAsync()
-        → Load Redis session
-        → POST SSO /upgradeToken { accessToken, branchCode }
-        → Update Redis: new tokens + branchCode
-        → Issue new BrdpToken aligned to new SsoAccessToken expiry
-    → Return { token, branchCode, expiresAt }
-SPA stores new token (old token is now stale)
-```
-
-### Refresh (transparent)
-```
-Request with expired/near-expiry BrdpToken
-  → TokenRefreshMiddleware detects
-  → Read Redis session
-  → POST SSO /refreshToken
-  → Update Redis session
-  → Issue new BrdpToken
-  → Inject new token into Authorization header (current request continues)
-  → Response header: X-New-BrdpToken: <new-token>
-  → SPA intercepts header and replaces stored token
-```
-
-### Logout
-```
-SPA → POST /auth/logout
-    → Read session from Redis
-    → Revoke SsoAccessToken at SSO
-    → Delete Redis session
-    → SignOut (Cookie + OIDC) → redirect to SSO global signout
-    → SSO redirects back → GET /auth/signout-callback → { signedOut: true }
-SPA removes BrdpToken → redirects to login
-```
-
-### Route Map
-| Method | Route                    | Auth      | Description                        |
-|--------|--------------------------|-----------|------------------------------------|
-| GET    | /auth/login              | Anonymous | Initiates OIDC challenge           |
-| GET    | /auth/signin-callback    | Anonymous | OIDC callback — issues BrdpToken   |
-| GET    | /auth/me                 | Required  | Current user identity              |
-| POST   | /auth/refresh            | Anonymous | Explicit BrdpToken refresh         |
-| POST   | /auth/logout             | Required  | Revoke + delete session + sign out |
-| GET    | /auth/signout-callback   | Anonymous | Post-SSO-signout landing           |
-
----
-
-## Registration (Program.cs)
+## Quick start
 
 ```csharp
 builder.Services.AddBrdpAuthentication(builder.Configuration, builder.Environment);
 
 // ...
-
-app.UseAuthentication();          // ASP.NET Core OIDC + Cookie handler
-app.UseBrdpAuthentication();      // TokenRefresh → BrdpAuth middleware
-app.UseAuthorization();
+app.UseAuthentication();          // OIDC + Cookie handlers
+app.UseBrdpAuthentication();      // ForwardedHeaders → CORS → RateLimiter
+                                  // → Correlation → TokenRefresh → BrdpAuthentication
 app.MapControllers();
 ```
 
+```bash
+dotnet build
+dotnet run --project src/Brdp.Authentication.Api
+```
+
+Redis must be reachable at `ConnectionStrings:Redis`. See [docs/USAGE.md](docs/USAGE.md)
+for full configuration and SPA integration.
+
 ---
 
-## Configuration (appsettings.json)
+## HTTP surface (summary)
 
-```json
-{
-  "ConnectionStrings": {
-    "Redis": "localhost:6379"
-  },
-  "Authentication": {
-    "SigningKey": "<min 32 chars>",
-    "Issuer": "BrdpApiGateway",
-    "Audience": "BrdpSpa",
-    "SingleSessionEnabled": true,
-    "EncryptTokensAtRest": false,
-    "ProactiveRefreshThreshold": "00:05:00"
-  },
-  "SsoAuthentication": {
-    "ClientId": "...",
-    "ClientSecret": "...",
-    "Authority": "https://sso.tps.ir",
-    "MetadataAddress": "https://sso.tps.ir/.well-known/openid-configuration",
-    "ResponseType": "code",
-    "Scopes": ["openid", "profile"],
-    "CallbackPath": "/signin-oidc",
-    "SignedOutCallbackPath": "/signout-callback-oidc",
-    "UpgradeTokenEndpoint": "/protocol/openid-connect/token/upgrade"
-  }
-}
+| Method | Route                  | Auth      | Description |
+|--------|------------------------|-----------|-------------|
+| GET    | `/auth/login`          | Anonymous | Initiates the OIDC challenge |
+| GET    | `/auth/callback`       | Anonymous | OIDC code exchange — issues BrdpToken |
+| GET    | `/auth/userinfo`       | Required  | Current user identity |
+| POST   | `/auth/refresh-token`  | Anonymous | Explicit BrdpToken rotation |
+| POST   | `/auth/logout`         | Required  | Revoke + delete session + sign out |
+| GET    | `/auth/signed-out`     | Anonymous | Post-signout landing |
+| POST   | `/branch/select`       | Required  | Branch users: upgrade token with branch context |
+
+Full route list, flows and invariants are in [docs/SPECS.md](docs/SPECS.md).
+
+---
+
+## Key design decisions
+
+| Decision | Detail |
+|---|---|
+| SPA never sees SSO tokens | SPA holds BrdpToken only; gateway holds SSO tokens in Redis |
+| Redis is session source of truth | Deleting a key invalidates the user instantly |
+| `Expiry(BrdpToken) == Expiry(SsoAccessToken)` | No SSO-token parsing on the hot path |
+| Redis TTL = refresh-token lifetime | Session survives access-token rotation |
+| Single-flight refresh (distributed lock) | Single-use SSO refresh tokens never double-spent |
+| Authorization via middleware + Redis | JWT validity alone is insufficient; Redis is authoritative |
+| Data Protection key ring in Redis | Encrypted sessions survive restarts & scale out |
+
+---
+
+## Redis key format
+
+```
+auth:session:{sha256(username.ToLowerInvariant())}   ← session payload (TTL = refresh lifetime)
+auth:lock:{sha256(username.ToLowerInvariant())}       ← distributed refresh lock
+auth:dataprotection-keys                              ← Data Protection key ring
 ```
 
 ---
 
-## Consuming IAuthenticatedUserContextAccessor in Services
+## Production checklist
 
-```csharp
-// In any Scoped service — no HttpContext dependency:
-public class MyService(IAuthenticatedUserContextAccessor accessor)
-{
-    public void DoWork()
-    {
-        var user = accessor.GetRequiredContext();
-        // user.UserCode, user.Username, user.BranchCode, etc.
-    }
-}
-```
-
----
-
-## Redis Key Format
-
-```
-auth:{sha256(username.ToLowerInvariant())}
-```
-
-TTL equals `RefreshTokenExpiry`. Deleting the key immediately logs the user out.
-
----
-
-## Production Checklist
-
-- [ ] Set a strong `Authentication:SigningKey` (≥ 32 chars) via secret manager / env var
-- [ ] Set `Authentication:EncryptTokensAtRest: true`
-- [ ] Configure Data Protection key storage (Azure Key Vault / Redis key ring)
-- [ ] Use TLS for Redis connection (`rediss://`)
-- [ ] Set `Authentication:SingleSessionEnabled: true`
-- [ ] Replace `ClientSecret` with secret manager reference
+- [ ] `Authentication:SigningKey` (≥32 chars) from a secret manager / env var
+- [ ] `SsoAuthentication:ClientSecret` from a secret manager / env var
+- [ ] `Authentication:EncryptTokensAtRest: true`
+- [ ] TLS for Redis (`rediss://` / `ssl=true`)
+- [ ] `Authentication:AllowedCorsOrigins` set to the real SPA origin(s)
+- [ ] `Authentication:SingleSessionEnabled` set per policy

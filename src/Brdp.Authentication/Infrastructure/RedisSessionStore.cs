@@ -29,9 +29,6 @@ internal sealed class RedisSessionStore
 
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>How long a refresh lock is held before expiring automatically.</summary>
-    private static readonly TimeSpan LockTtl = TimeSpan.FromSeconds(10);
-
     /// <summary>
     /// Lua script for atomic lock release:
     /// Only deletes the key if its value matches the caller's token,
@@ -143,7 +140,7 @@ internal sealed class RedisSessionStore
     {
         var lockKey   = RedisKeyHelper.LockKey(username);
         var lockToken = Guid.NewGuid().ToString("N"); // unique per caller to prevent cross-release
-        var deadline  = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(8));
+        var deadline  = DateTimeOffset.UtcNow + (timeout ?? _options.RefreshLockTimeout);
         var db        = _redis.GetDatabase();
 
         // ── Acquire lock (SET NX PX) ──────────────────────────────────────────
@@ -152,36 +149,28 @@ internal sealed class RedisSessionStore
             ct.ThrowIfCancellationRequested();
 
             var acquired = await db
-                .StringSetAsync(lockKey, lockToken, LockTtl, When.NotExists)
+                .StringSetAsync(lockKey, lockToken, _options.RefreshLockTtl, When.NotExists)
                 .ConfigureAwait(false);
 
             if (acquired) break;
 
             if (DateTimeOffset.UtcNow >= deadline)
             {
+                // The winner should already have persisted fresh tokens. Return null so
+                // the SPA retries and the next request reads the updated session —
+                // returning a stale BrdpToken would be worse than a single retry.
                 _logger.LogWarning(
                     "Could not acquire refresh lock for {Username} within timeout. " +
-                    "Another refresh may be in progress.", username);
-
-                // Last resort: read whatever the winner wrote and return it.
-                // The session in Redis should already have fresh tokens.
-                var latestSession = await GetByUsernameAsync(username, ct).ConfigureAwait(false);
-                if (latestSession is not null)
-                {
-                    _logger.LogInformation(
-                        "Returning session refreshed by concurrent caller for {Username}.", username);
-                    // Return null here — the middleware/controller will re-read the
-                    // updated session on the next request. Returning a stale BrdpToken
-                    // is worse than asking the SPA to retry.
-                }
+                    "Another refresh may be in progress — caller should retry.", username);
 
                 return null;
             }
 
             _logger.LogDebug(
-                "Refresh lock for {Username} is held by another caller — waiting 100 ms.", username);
+                "Refresh lock for {Username} is held by another caller — waiting {PollMs} ms.",
+                username, _options.RefreshLockPollInterval.TotalMilliseconds);
 
-            await Task.Delay(100, ct).ConfigureAwait(false);
+            await Task.Delay(_options.RefreshLockPollInterval, ct).ConfigureAwait(false);
         }
 
         // ── Lock acquired — we are the sole refresh caller ────────────────────

@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Brdp.Authentication.Models;
 
 /// <summary>
-/// The payload stored in Redis under key <c>auth:{sha256(username)}</c>.
+/// The payload stored in Redis under key <c>auth:session:{sha256(username)}</c>.
 ///
 /// TTL rule: Redis TTL = RefreshTokenExpiry (not AccessTokenExpiry).
 /// An expired AccessToken does NOT mean an expired session — the refresh flow
