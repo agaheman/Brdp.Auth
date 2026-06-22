@@ -9,35 +9,34 @@
     <AssemblyName>Brdp.Authentication</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Keep the generated XML for IntelliSense, but don't warn on every undocumented member. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
+  <!--
+    ASP.NET Core shared framework — provides MVC, core Authentication + Cookies,
+    DataProtection, CORS, HttpOverrides (ForwardedHeaders), RateLimiting, HttpClientFactory,
+    Options, Logging and the Microsoft.Extensions.* stack. Preferred over individual package
+    references for an ASP.NET Core class library — avoids version drift against the runtime.
+  -->
   <ItemGroup>
-    <!-- Redis -->
-    <PackageReference Include="StackExchange.Redis" Version="2.12.8" />
-    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.0" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
 
-    <!-- JWT — IdentityModel 8.x: Active release, tied to .NET 9/10 lifecycle (~Nov 2028) -->
+  <ItemGroup>
+    <!-- OIDC handler is NOT part of the shared framework — must be referenced explicitly. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0" />
+
+    <!-- Redis client (third-party, not in the shared framework) -->
+    <PackageReference Include="StackExchange.Redis" Version="2.12.8" />
+
+    <!-- Persist the Data Protection key ring to Redis so encrypted sessions survive
+         restarts and are shared across horizontally-scaled instances. -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.0" />
+
+    <!-- JWT — IdentityModel 8.x: active release, tied to .NET 9/10 lifecycle (~Nov 2028) -->
     <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.17.0" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.17.0" />
-
-    <!-- ASP.NET Core integration (for middleware, controllers) -->
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Core" Version="10.0.0" />
-
-    <!-- HTTP Client -->
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
-
-    <!-- Options / DI -->
-    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
-
-    <!-- Data Protection (encryption at rest) -->
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.0" />
-
-    <!-- JSON — inbox in net10, explicit ref ensures no transitive downgrade -->
-    <PackageReference Include="System.Text.Json" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

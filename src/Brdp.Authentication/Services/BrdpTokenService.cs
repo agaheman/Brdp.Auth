@@ -38,6 +38,16 @@ internal sealed class BrdpTokenService : IBrdpTokenService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SigningKey));
         _signingCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+        // Current key signs new tokens; current + previous keys all validate, so a
+        // signing-key rotation can be rolled out without invalidating live tokens.
+        SecurityKey[] validationKeys =
+        [
+            key,
+            .. _options.PreviousSigningKeys
+                .Where(k => !string.IsNullOrWhiteSpace(k))
+                .Select(k => new SymmetricSecurityKey(Encoding.UTF8.GetBytes(k))),
+        ];
+
         _validationParameters = new TokenValidationParameters
         {
             ValidateIssuer           = true,
@@ -47,13 +57,12 @@ internal sealed class BrdpTokenService : IBrdpTokenService
             ValidateLifetime         = true,
             ClockSkew                = TimeSpan.FromSeconds(30),
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey         = key,
+            IssuerSigningKeys        = validationKeys,
         };
 
-        _validationParametersIgnoreExpiry = _validationParameters with
-        {
-            ValidateLifetime = false,
-        };
+        // TokenValidationParameters is not a record type — clone then override.
+        _validationParametersIgnoreExpiry = _validationParameters.Clone();
+        _validationParametersIgnoreExpiry.ValidateLifetime = false;
     }
 
     // ── Issue ─────────────────────────────────────────────────────────────────

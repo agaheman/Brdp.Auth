@@ -7,6 +7,12 @@ namespace Brdp.Authentication.Models;
 /// </summary>
 public sealed class SsoTokenResponse
 {
+    /// <summary>
+    /// Captured once at construction (i.e. deserialization) so the computed expiry
+    /// properties below are stable rather than drifting on every access.
+    /// </summary>
+    private readonly DateTimeOffset _receivedAt = DateTimeOffset.UtcNow;
+
     [JsonPropertyName("access_token")]
     public required string AccessToken { get; init; }
 
@@ -19,9 +25,9 @@ public sealed class SsoTokenResponse
     [JsonPropertyName("refresh_expires_in")]
     public int RefreshExpiresIn { get; init; }
 
-    /// <summary>Computed from <see cref="ExpiresIn"/> at parse time.</summary>
-    public DateTimeOffset AccessTokenExpiry  => DateTimeOffset.UtcNow.AddSeconds(ExpiresIn);
+    /// <summary>Computed from <see cref="ExpiresIn"/> relative to the receive time.</summary>
+    public DateTimeOffset AccessTokenExpiry  => _receivedAt.AddSeconds(ExpiresIn);
 
-    /// <summary>Computed from <see cref="RefreshExpiresIn"/> at parse time.</summary>
-    public DateTimeOffset RefreshTokenExpiry => DateTimeOffset.UtcNow.AddSeconds(RefreshExpiresIn);
+    /// <summary>Computed from <see cref="RefreshExpiresIn"/> relative to the receive time.</summary>
+    public DateTimeOffset RefreshTokenExpiry => _receivedAt.AddSeconds(RefreshExpiresIn);
 }

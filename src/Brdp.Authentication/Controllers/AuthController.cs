@@ -2,9 +2,12 @@ using Brdp.Authentication.Abstractions;
 using Brdp.Authentication.Configuration;
 using Brdp.Authentication.Models;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+
+// Disambiguate from Microsoft.AspNetCore.Authentication.AuthenticationOptions,
+// which the OIDC handler brings into scope via the `using` above.
+using AuthenticationOptions = Brdp.Authentication.Configuration.AuthenticationOptions;
 
 namespace Brdp.Authentication.Controllers;
 
@@ -51,7 +54,6 @@ public sealed class AuthController : ControllerBase
     /// Challenges the OIDC scheme, which redirects the browser to the TPS SSO
     /// authorization endpoint. After authentication SSO redirects to <c>/auth/callback</c>.
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("login")]
     public IActionResult Login([FromQuery] string returnUrl = "/")
         => Challenge(
@@ -69,7 +71,6 @@ public sealed class AuthController : ControllerBase
     /// them into the cookie session. This action reads those tokens, creates the
     /// Redis session, and issues a BrdpToken for the SPA.
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("callback")]
     public async Task<IActionResult> Callback(
         [FromQuery] string returnUrl = "/",
@@ -100,10 +101,19 @@ public sealed class AuthController : ControllerBase
         var accessTokenExpiry = DateTimeOffset.TryParse(
                 result.Properties?.GetTokenValue("expires_at"), out var parsed)
             ? parsed
-            : DateTimeOffset.UtcNow.AddHours(1);
+            : DateTimeOffset.UtcNow + _authOptions.AccessTokenFallbackLifetime;
 
-        var refreshTokenExpiry = DateTimeOffset.UtcNow.AddHours(8);
-        var clientIp           = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        // Prefer the SSO's real refresh-token lifetime (captured by the OIDC
+        // OnTokenResponseReceived event) so the Redis TTL matches it; fall back to
+        // the configured RefreshTokenLifetime only when SSO does not advertise it.
+        var refreshTokenExpiry =
+            result.Properties is not null
+            && result.Properties.Items.TryGetValue("sso.refresh_expires_in", out var refreshExpiresInRaw)
+            && int.TryParse(refreshExpiresInRaw, out var refreshExpiresIn)
+                ? DateTimeOffset.UtcNow.AddSeconds(refreshExpiresIn)
+                : DateTimeOffset.UtcNow + _authOptions.RefreshTokenLifetime;
+
+        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         if (_authOptions.SingleSessionEnabled)
             await _sessions.DeleteAsync(username, ct).ConfigureAwait(false);
@@ -176,10 +186,9 @@ public sealed class AuthController : ControllerBase
     /// across all concurrent SPA tabs/requests — preventing double-consumption of the
     /// single-use SSO refresh token.
     ///
-    /// The <see cref="TokenRefreshMiddleware"/> handles transparent rotation on every
+    /// The <see cref="Middleware.TokenRefreshMiddleware"/> handles transparent rotation on every
     /// request. Use this endpoint for SPA-initiated explicit refresh flows.
     /// </summary>
-    [AllowAnonymous]
     [HttpPost("refresh-token")]
     public async Task<IActionResult> RefreshToken(
         [FromHeader(Name = "Authorization")] string? authorization,
@@ -261,7 +270,6 @@ public sealed class AuthController : ControllerBase
     /// SSO redirects here after completing global sign-out.
     /// SPA should detect this response and navigate to the login page.
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("signed-out")]
     public IActionResult SignedOut() => Ok(new { signedOut = true });
 
