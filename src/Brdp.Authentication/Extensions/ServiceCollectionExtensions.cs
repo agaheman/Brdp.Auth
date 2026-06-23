@@ -4,13 +4,6 @@ using Brdp.Authentication.Configuration;
 using Brdp.Authentication.Infrastructure;
 using Brdp.Authentication.Security;
 using Brdp.Authentication.Services;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.HttpOverrides;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -30,8 +23,8 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddBrdpAuthentication(
         this IServiceCollection services,
-        IConfiguration          configuration,
-        IHostEnvironment        environment)
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
         // ── Configuration ─────────────────────────────────────────────────────
         services
@@ -87,10 +80,10 @@ public static class ServiceCollectionExtensions
 
         // ── Services ──────────────────────────────────────────────────────────
         services.AddScoped<IAuthenticatedUserContextAccessor, AuthenticatedUserContextAccessor>();
-        services.AddScoped<ISessionService,                   SessionService>();
-        services.AddSingleton<IBrdpTokenService,              BrdpTokenService>();
-        services.AddScoped<ISsoTokenService,                  SsoTokenService>();
-        services.AddScoped<IBranchService,                    BranchService>();
+        services.AddScoped<ISessionService, SessionService>();
+        services.AddSingleton<IBrdpTokenService, BrdpTokenService>();
+        services.AddScoped<ISsoTokenService, SsoTokenService>();
+        services.AddScoped<IBranchService, BranchService>();
 
         // ── SSO HTTP Client ───────────────────────────────────────────────────
         services
@@ -102,7 +95,7 @@ public static class ServiceCollectionExtensions
                     ?? throw new InvalidOperationException("SsoAuthentication:Authority is required.");
 
                 client.BaseAddress = new Uri(authority);
-                client.Timeout     = TimeSpan.FromSeconds(15);
+                client.Timeout = TimeSpan.FromSeconds(15);
             });
 
         // ── Forwarded headers (BFF runs behind a gateway / reverse proxy) ──────
@@ -158,12 +151,12 @@ public static class ServiceCollectionExtensions
         services
             .AddAuthentication(options =>
             {
-                options.DefaultScheme          = SsoAuthenticationDefaults.CookieScheme;
+                options.DefaultScheme = SsoAuthenticationDefaults.CookieScheme;
                 options.DefaultChallengeScheme = SsoAuthenticationDefaults.OidcScheme;
             })
             .AddCookie(SsoAuthenticationDefaults.CookieScheme, options =>
             {
-                options.Cookie.Name     = "brdp_session";
+                options.Cookie.Name = "brdp_session";
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Lax;
                 options.Cookie.SecurePolicy = environment.IsProduction()
@@ -174,14 +167,14 @@ public static class ServiceCollectionExtensions
             {
                 var sso = configuration.GetSection(SsoAuthenticationOptions.SectionName);
 
-                options.Authority             = sso["Authority"];
-                options.MetadataAddress       = sso["MetadataAddress"];
-                options.ClientId              = sso["ClientId"];
-                options.ClientSecret          = sso["ClientSecret"];
-                options.ResponseType          = sso["ResponseType"] ?? "code";
-                options.CallbackPath          = sso["CallbackPath"] ?? "/signin-oidc";
+                options.Authority = sso["Authority"];
+                options.MetadataAddress = sso["MetadataAddress"];
+                options.ClientId = sso["ClientId"];
+                options.ClientSecret = sso["ClientSecret"];
+                options.ResponseType = sso["ResponseType"] ?? "code";
+                options.CallbackPath = sso["CallbackPath"] ?? "/signin-oidc";
                 options.SignedOutCallbackPath = sso["SignedOutCallbackPath"] ?? "/signout-callback-oidc";
-                options.SaveTokens            = true;  // Required: tokens stored in cookie for /auth/callback
+                options.SaveTokens = true;  // Required: tokens stored in cookie for /auth/callback
                 options.GetClaimsFromUserInfoEndpoint = true;
 
                 var scopes = sso.GetSection("Scopes").Get<string[]>() ?? ["openid", "profile"];

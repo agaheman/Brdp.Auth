@@ -4,6 +4,7 @@ using Brdp.Authentication.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using AuthenticationOptions = Brdp.Authentication.Configuration.AuthenticationOptions;
 
 // Disambiguate from Microsoft.AspNetCore.Authentication.AuthenticationOptions,
 // which the OIDC handler brings into scope via the `using` above.
@@ -54,8 +55,9 @@ public sealed class AuthController : ControllerBase
     /// Challenges the OIDC scheme, which redirects the browser to the TPS SSO
     /// authorization endpoint. After authentication SSO redirects to <c>/auth/callback</c>.
     /// </summary>
-    [HttpGet("login")]
-    public IActionResult Login([FromQuery] string returnUrl = "/")
+    [AllowAnonymous]
+    [HttpGet("SignIn")]
+    public IActionResult SignIn([FromQuery] string returnUrl = "/")
         => Challenge(
             new AuthenticationProperties
             {
@@ -71,8 +73,9 @@ public sealed class AuthController : ControllerBase
     /// them into the cookie session. This action reads those tokens, creates the
     /// Redis session, and issues a BrdpToken for the SPA.
     /// </summary>
-    [HttpGet("callback")]
-    public async Task<IActionResult> Callback(
+    [AllowAnonymous]
+    [HttpGet("SignInCallback")]
+    public async Task<IActionResult> SignInCallback(
         [FromQuery] string returnUrl = "/",
         CancellationToken ct = default)
     {
@@ -261,8 +264,8 @@ public sealed class AuthController : ControllerBase
     /// the OIDC end_session flow. SSO redirects the browser to <c>/auth/signed-out</c>
     /// after completing global sign-out.
     /// </summary>
-    [HttpPost("logout")]
-    public async Task<IActionResult> Logout(CancellationToken ct = default)
+    [HttpPost("SignOut")]
+    public async Task<IActionResult> SignOut(CancellationToken ct = default)
     {
         var user    = _accessor.GetRequiredContext();
         var session = await _sessions.GetByUsernameAsync(user.Username, ct).ConfigureAwait(false);
@@ -286,8 +289,9 @@ public sealed class AuthController : ControllerBase
     /// SSO redirects here after completing global sign-out.
     /// SPA should detect this response and navigate to the login page.
     /// </summary>
-    [HttpGet("signed-out")]
-    public IActionResult SignedOut() => Ok(new { signedOut = true });
+    [AllowAnonymous]
+    [HttpGet("SignOutCallback")]
+    public IActionResult SignOutCallback() => Ok(new { signedOut = true });
 
     // ── Private helpers ───────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 using Brdp.Authentication.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
-
+Console.WriteLine(builder.Environment.EnvironmentName);
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddBrdpAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddOpenApi();
