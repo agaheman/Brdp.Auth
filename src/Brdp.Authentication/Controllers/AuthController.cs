@@ -145,6 +145,22 @@ public sealed class AuthController : ControllerBase
             },
             accessTokenExpiry);
 
+        // Browser SPA flow: when returnUrl points at a local page, redirect there
+        // and hand the BrdpToken back in the URL fragment (#token=…), which never
+        // travels to a server or appears in access logs. Url.IsLocalUrl rejects
+        // absolute/off-site URLs, so this cannot be abused as an open redirect.
+        if (!string.IsNullOrWhiteSpace(returnUrl) && returnUrl != "/" && Url.IsLocalUrl(returnUrl))
+        {
+            var separator   = returnUrl.Contains('#') ? '&' : '#';
+            var redirectUrl =
+                $"{returnUrl}{separator}token={Uri.EscapeDataString(brdpToken)}" +
+                $"&expiresAt={Uri.EscapeDataString(accessTokenExpiry.ToString("O"))}" +
+                $"&isBranchUser={(isBranchUser ? "true" : "false")}";
+
+            return Redirect(redirectUrl);
+        }
+
+        // Programmatic callers (returnUrl omitted or "/") keep the JSON contract.
         return Ok(new
         {
             token        = brdpToken,

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile · Dotin Authentication Sample</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <main class="card stack">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2 4 5v6c0 5 3.4 8.4 8 11 4.6-2.6 8-6 8-11V5l-8-3Z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      </div>
+      <div>
+        <h1>Dotin Authentication Sample</h1>
+        <p class="subtitle">Signed-in user</p>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="center">
+      <p class="lead">Loading your profile…</p>
+      <div class="spinner" aria-label="Loading"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="error" class="hidden stack">
+      <div class="alert alert-err">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+        <span id="errorMsg">Your session has expired.</span>
+      </div>
+      <a class="btn btn-primary" href="/index.html">Sign in again</a>
+    </div>
+
+    <!-- Profile -->
+    <div id="profile" class="hidden">
+      <div class="avatar" id="avatar">··</div>
+      <p class="center" style="margin:0 0 4px">
+        <strong id="fullName">—</strong>
+        <span id="branchBadge" class="badge hidden">BRANCH USER</span>
+      </p>
+      <p class="center" style="margin:0;color:var(--muted)" id="usernameLine">—</p>
+
+      <dl class="profile-grid">
+        <dt>User code</dt>   <dd id="userCode">—</dd>
+        <dt>Username</dt>    <dd id="username">—</dd>
+        <dt>First name</dt>  <dd id="firstName">—</dd>
+        <dt>Last name</dt>   <dd id="lastName">—</dd>
+        <dt>Branch code</dt> <dd id="branchCode">—</dd>
+        <dt>Session ID</dt>  <dd id="sessionId">—</dd>
+      </dl>
+
+      <button id="logoutBtn" class="btn btn-ghost" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="m16 17 5-5-5-5" /><path d="M21 12H9" />
+        </svg>
+        Sign out
+      </button>
+    </div>
+
+    <div class="foot">Identity from <code>/auth/userinfo</code> · Brdp.Authentication</div>
+  </main>
+
+  <script src="/assets/app.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function show(section) {
+      ["loading", "error", "profile"].forEach((s) =>
+        $(s).classList.toggle("hidden", s !== section));
+    }
+
+    function fail(msg) {
+      if (msg) $("errorMsg").textContent = msg;
+      show("error");
+    }
+
+    async function loadProfile() {
+      if (!Dotin.getToken()) return fail("You are not signed in.");
+
+      let res;
+      try {
+        res = await Dotin.authFetch("/auth/userinfo");
+      } catch (e) {
+        return fail("Could not reach the gateway. Is the API running?");
+      }
+
+      if (res.status === 401) {
+        Dotin.clearSession();
+        return fail("Your session has expired or was revoked.");
+      }
+      if (!res.ok) return fail(`Unexpected response (${res.status}).`);
+
+      const u = await res.json();
+      $("fullName").textContent =
+        [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username;
+      $("usernameLine").textContent = u.username || "";
+      $("avatar").textContent = Dotin.initials(u.firstName, u.lastName, u.username);
+      $("userCode").textContent = u.userCode || "—";
+      $("username").textContent = u.username || "—";
+      $("firstName").textContent = u.firstName || "—";
+      $("lastName").textContent = u.lastName || "—";
+      $("branchCode").textContent = u.branchCode || "—";
+      $("sessionId").textContent = u.sessionId || "—";
+      if (u.isBranchUser) $("branchBadge").classList.remove("hidden");
+
+      show("profile");
+    }
+
+    async function logout() {
+      $("logoutBtn").disabled = true;
+      $("logoutBtn").textContent = "Signing out…";
+      try {
+        await Dotin.authFetch("/auth/logout", { method: "POST", redirect: "manual" });
+      } catch (_) {
+        /* session is already gone server-side; ignore transport errors */
+      } finally {
+        Dotin.clearSession();
+        window.location.href = "/index.html";
+      }
+    }
+
+    $("logoutBtn").addEventListener("click", logout);
+    loadProfile();
+  </script>
+</body>
+</html>

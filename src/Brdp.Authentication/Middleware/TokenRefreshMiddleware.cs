@@ -33,8 +33,6 @@ public sealed class TokenRefreshMiddleware
 {
     private readonly RequestDelegate                 _next;
     private readonly IBrdpTokenService               _brdpTokens;
-    private readonly ISessionService                 _sessions;
-    private readonly ISsoTokenService                _ssoTokens;
     private readonly AuthenticationOptions           _options;
     private readonly ILogger<TokenRefreshMiddleware> _logger;
 
@@ -55,20 +53,21 @@ public sealed class TokenRefreshMiddleware
     public TokenRefreshMiddleware(
         RequestDelegate                  next,
         IBrdpTokenService                brdpTokens,
-        ISessionService                  sessions,
-        ISsoTokenService                 ssoTokens,
         IOptions<AuthenticationOptions>  options,
         ILogger<TokenRefreshMiddleware>  logger)
     {
         _next       = next;
         _brdpTokens = brdpTokens;
-        _sessions   = sessions;
-        _ssoTokens  = ssoTokens;
         _options    = options.Value;
         _logger     = logger;
     }
 
-    public async Task InvokeAsync(HttpContext context)
+    // ISessionService and ISsoTokenService are Scoped, so they are injected per-request
+    // via InvokeAsync rather than the singleton constructor (avoids root-scope resolve).
+    public async Task InvokeAsync(
+        HttpContext context,
+        ISessionService sessions,
+        ISsoTokenService ssoTokens)
     {
         if (ShouldSkip(context.Request.Path))
         {
@@ -91,7 +90,8 @@ public sealed class TokenRefreshMiddleware
 
         _logger.LogInformation("Token refresh triggered for {Username}.", claims?.Username ?? "unknown");
 
-        var newToken = await RefreshWithLockAsync(claims, context.RequestAborted).ConfigureAwait(false);
+        var newToken = await RefreshWithLockAsync(claims, sessions, ssoTokens, context.RequestAborted)
+            .ConfigureAwait(false);
 
         if (newToken is null)
         {
@@ -110,11 +110,15 @@ public sealed class TokenRefreshMiddleware
 
     // ── Refresh with distributed lock ─────────────────────────────────────────
 
-    private async Task<string?> RefreshWithLockAsync(BrdpTokenClaims? claims, CancellationToken ct)
+    private async Task<string?> RefreshWithLockAsync(
+        BrdpTokenClaims? claims,
+        ISessionService sessions,
+        ISsoTokenService ssoTokens,
+        CancellationToken ct)
     {
         if (claims is null) return null;
 
-        return await _sessions.ExecuteWithRefreshLockAsync<string>(
+        return await sessions.ExecuteWithRefreshLockAsync<string>(
             claims.Username,
             async (session, innerCt) =>
             {
@@ -129,7 +133,7 @@ public sealed class TokenRefreshMiddleware
                     return _brdpTokens.Issue(SessionToClaims(session), session.AccessTokenExpiry);
                 }
 
-                var ssoResponse = await _ssoTokens
+                var ssoResponse = await ssoTokens
                     .RefreshAsync(session.SsoRefreshToken, innerCt)
                     .ConfigureAwait(false);
 
@@ -144,7 +148,7 @@ public sealed class TokenRefreshMiddleware
                 session.AccessTokenExpiry  = ssoResponse.AccessTokenExpiry;
                 session.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
 
-                await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
+                await sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
                 return _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
             },

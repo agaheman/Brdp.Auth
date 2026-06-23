@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Signing in… · Dotin Authentication Sample</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <main class="card stack center">
+    <div class="brand" style="justify-content:center">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2 4 5v6c0 5 3.4 8.4 8 11 4.6-2.6 8-6 8-11V5l-8-3Z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      </div>
+      <h1>Dotin Authentication Sample</h1>
+    </div>
+
+    <!-- Success state -->
+    <div id="ok" class="hidden stack">
+      <div class="check" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </div>
+      <p class="lead" style="margin:0">Sign-in successful — completing your session…</p>
+      <div class="spinner" aria-label="Loading"></div>
+    </div>
+
+    <!-- Failure state -->
+    <div id="fail" class="hidden stack">
+      <div class="alert alert-err">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+        <span>We couldn’t complete the sign-in.</span>
+      </div>
+      <p class="lead" id="failMsg" style="margin:0">No token was returned by the gateway.</p>
+      <a class="btn btn-primary" href="/index.html">Back to sign in</a>
+    </div>
+
+    <div class="foot">OIDC callback · Brdp.Authentication</div>
+  </main>
+
+  <script src="/assets/app.js"></script>
+  <script>
+    (function () {
+      const result = Dotin.captureTokenFromFragment();
+      if (result && result.token) {
+        document.getElementById("ok").classList.remove("hidden");
+        setTimeout(() => { window.location.href = "/profile.html"; }, 1000);
+      } else {
+        document.getElementById("fail").classList.remove("hidden");
+      }
+    })();
+  </script>
+</body>
+</html>

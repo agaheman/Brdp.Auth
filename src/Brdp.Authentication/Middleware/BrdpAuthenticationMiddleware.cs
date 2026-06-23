@@ -26,7 +26,6 @@ public sealed class BrdpAuthenticationMiddleware
 {
     private readonly RequestDelegate                        _next;
     private readonly IBrdpTokenService                      _brdpTokens;
-    private readonly ISessionService                        _sessions;
     private readonly ILogger<BrdpAuthenticationMiddleware>  _logger;
     private readonly AuthenticationOptions                  _options;
 
@@ -45,18 +44,21 @@ public sealed class BrdpAuthenticationMiddleware
     public BrdpAuthenticationMiddleware(
         RequestDelegate                         next,
         IBrdpTokenService                       brdpTokens,
-        ISessionService                         sessions,
         IOptions<AuthenticationOptions>         options,
         ILogger<BrdpAuthenticationMiddleware>   logger)
     {
         _next       = next;
         _brdpTokens = brdpTokens;
-        _sessions   = sessions;
         _options    = options.Value;
         _logger     = logger;
     }
 
-    public async Task InvokeAsync(HttpContext context, IAuthenticatedUserContextAccessor accessor)
+    // ISessionService is Scoped, so it is injected per-request via InvokeAsync
+    // (not the singleton constructor) to avoid a captive-dependency / root-scope resolve.
+    public async Task InvokeAsync(
+        HttpContext context,
+        IAuthenticatedUserContextAccessor accessor,
+        ISessionService sessions)
     {
         // ── Bypass anonymous paths ────────────────────────────────────────────
         if (IsAnonymousPath(context.Request.Path))
@@ -88,7 +90,7 @@ public sealed class BrdpAuthenticationMiddleware
         }
 
         // ── Step 3: Single Redis lookup ───────────────────────────────────────
-        var session = await _sessions
+        var session = await sessions
             .GetByUsernameAsync(claims.Username, context.RequestAborted)
             .ConfigureAwait(false);
 
