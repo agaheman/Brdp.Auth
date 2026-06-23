@@ -18,6 +18,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// Serve the static "Dotin Authentication Sample" SPA from wwwroot. Registered
+// before the BFF middleware so static assets are returned without an auth check.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 // 1. ASP.NET Core cookie/OIDC scheme (handles /signin-oidc callback internally).
 app.UseAuthentication();
 
