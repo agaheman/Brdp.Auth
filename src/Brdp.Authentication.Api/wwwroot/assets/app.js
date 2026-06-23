@@ -13,7 +13,7 @@
  */
 const Dotin = (() => {
   // Same-origin gateway (the sample is served from the API host's wwwroot).
-  const API_BASE = "";
+  const API_BASE = "https://localhost:3443";
   const TOKEN_KEY = "dotin.brdpToken";
   const EXP_KEY = "dotin.expiresAt";
 
@@ -34,8 +34,7 @@ const Dotin = (() => {
   // with the issued BrdpToken in the URL fragment.
   const login = () => {
     const returnUrl = "/callback.html";
-    window.location.href =
-      `${API_BASE}/auth/login?returnUrl=${encodeURIComponent(returnUrl)}`;
+    window.location.href = `${API_BASE}/auth/SignIn?returnUrl=${encodeURIComponent(returnUrl)}`;
   };
 
   // Fetch wrapper that injects the Bearer token and absorbs token rotation.
