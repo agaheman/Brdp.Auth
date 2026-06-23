@@ -2,14 +2,13 @@ using Brdp.Authentication.Abstractions;
 using Brdp.Authentication.Configuration;
 using Brdp.Authentication.Models;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using AuthenticationOptions = Brdp.Authentication.Configuration.AuthenticationOptions;
 
 // Disambiguate from Microsoft.AspNetCore.Authentication.AuthenticationOptions,
 // which the OIDC handler brings into scope via the `using` above.
-using AuthenticationOptions = Brdp.Authentication.Configuration.AuthenticationOptions;
-
 namespace Brdp.Authentication.Controllers;
 
 /// <summary>
