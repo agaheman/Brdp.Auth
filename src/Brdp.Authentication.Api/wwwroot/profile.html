@@ -119,7 +119,7 @@
       $("logoutBtn").disabled = true;
       $("logoutBtn").textContent = "Signing out…";
       try {
-        await Dotin.authFetch("/auth/logout", { method: "POST", redirect: "manual" });
+        await Dotin.authFetch("/auth/SignOut", { method: "POST", redirect: "manual" });
       } catch (_) {
         /* session is already gone server-side; ignore transport errors */
       } finally {

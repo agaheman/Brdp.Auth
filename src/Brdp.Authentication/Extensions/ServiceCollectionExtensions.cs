@@ -178,7 +178,7 @@ public static class ServiceCollectionExtensions
                 options.ResponseType = sso["ResponseType"] ?? "code";
                 options.CallbackPath = sso["CallbackPath"] ?? "/signin-oidc";
                 options.SignedOutCallbackPath = sso["SignedOutCallbackPath"] ?? "/signout-callback-oidc";
-                options.SaveTokens = true;  // Required: tokens stored in cookie for /auth/callback
+                options.SaveTokens = true;  // Required: tokens stored in cookie for /auth/SignInCallback
                 options.GetClaimsFromUserInfoEndpoint = true;
 
                 var scopes = sso.GetSection("Scopes").Get<string[]>() ?? ["openid", "profile"];

@@ -16,12 +16,12 @@ namespace Brdp.Authentication.Controllers;
 ///
 /// Action names follow the OIDC/OAuth2 specification terminology and ASP.NET Core Identity conventions:
 ///
-///   GET  /auth/login              Login           — initiates OIDC Authorization-Code challenge
-///   GET  /auth/callback           Callback        — OIDC code exchange; creates session + issues BrdpToken
+///   GET  /auth/SignIn             SignIn          — initiates OIDC Authorization-Code challenge
+///   GET  /auth/SignInCallback     SignInCallback  — OIDC code exchange; creates session + issues BrdpToken
 ///   GET  /auth/userinfo           UserInfo        — mirrors the OIDC userinfo endpoint semantics
 ///   POST /auth/refresh-token      RefreshToken    — explicit token rotation (RFC 6749 §6)
-///   POST /auth/logout             Logout          — revoke + delete session + trigger OIDC end_session
-///   GET  /auth/signed-out         SignedOut       — post-SSO-signout landing (OIDC post_logout_redirect_uri)
+///   POST /auth/SignOut            SignOut         — revoke + delete session + trigger OIDC end_session
+///   GET  /auth/SignOutCallback    SignOutCallback — post-SSO-signout landing (OIDC post_logout_redirect_uri)
 /// </summary>
 [ApiController]
 [Route("auth")]
@@ -52,7 +52,7 @@ public sealed class AuthController : ControllerBase
     /// <summary>
     /// Initiates the OIDC Authorization-Code flow.
     /// Challenges the OIDC scheme, which redirects the browser to the TPS SSO
-    /// authorization endpoint. After authentication SSO redirects to <c>/auth/callback</c>.
+    /// authorization endpoint. After authentication SSO redirects to <c>/auth/SignInCallback</c>.
     /// </summary>
     [AllowAnonymous]
     [HttpGet("SignIn")]
@@ -60,7 +60,7 @@ public sealed class AuthController : ControllerBase
         => Challenge(
             new AuthenticationProperties
             {
-                RedirectUri = $"/auth/callback?returnUrl={Uri.EscapeDataString(returnUrl)}"
+                RedirectUri = $"/auth/SignInCallback?returnUrl={Uri.EscapeDataString(returnUrl)}"
             },
             SsoAuthenticationDefaults.OidcScheme);
 
@@ -260,7 +260,7 @@ public sealed class AuthController : ControllerBase
 
     /// <summary>
     /// Revokes the SSO access token, deletes the Redis session, and triggers
-    /// the OIDC end_session flow. SSO redirects the browser to <c>/auth/signed-out</c>
+    /// the OIDC end_session flow. SSO redirects the browser to <c>/auth/SignOutCallback</c>
     /// after completing global sign-out.
     /// </summary>
     [HttpPost("SignOut")]
@@ -276,7 +276,7 @@ public sealed class AuthController : ControllerBase
         }
 
         return SignOut(
-            new AuthenticationProperties { RedirectUri = "/auth/signed-out" },
+            new AuthenticationProperties { RedirectUri = "/auth/SignOutCallback" },
             SsoAuthenticationDefaults.CookieScheme,
             SsoAuthenticationDefaults.OidcScheme);
     }
