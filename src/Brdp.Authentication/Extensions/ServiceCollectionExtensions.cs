@@ -90,7 +90,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IBranchService, BranchService>();
 
         // ── SSO HTTP Client ───────────────────────────────────────────────────
-        services
+        var ssoClientBuilder = services
             .AddHttpClient<SsoHttpClient>(client =>
             {
                 var authority = configuration
@@ -100,6 +100,14 @@ public static class ServiceCollectionExtensions
 
                 client.BaseAddress = new Uri(authority);
                 client.Timeout = TimeSpan.FromSeconds(15);
+            });
+
+        // Same untrusted-CA bypass for the SSO HTTP client (token refresh / revoke calls).
+        if (!environment.IsProduction())
+            ssoClientBuilder.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback =
+                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
             });
 
         // ── Forwarded headers (BFF runs behind a gateway / reverse proxy) ──────
@@ -187,6 +195,17 @@ public static class ServiceCollectionExtensions
                     options.Scope.Add(scope);
 
                 options.RequireHttpsMetadata = environment.IsProduction();
+
+                // In non-production the SSO server may use an internal/self-signed CA.
+                // Bypass TLS validation only for the OIDC backchannel (metadata + token endpoint).
+                if (!environment.IsProduction())
+                {
+                    options.BackchannelHttpHandler = new HttpClientHandler
+                    {
+                        ServerCertificateCustomValidationCallback =
+                            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                    };
+                }
 
                 // Capture the non-standard refresh_expires_in so the Redis session TTL
                 // reflects the SSO's real refresh-token lifetime instead of a guess.
