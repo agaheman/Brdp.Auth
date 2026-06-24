@@ -229,6 +229,7 @@
   // ── Read URL params ──────────────────────────────────────────────────────
   const params      = new URLSearchParams(location.search);
   const errorCode   = params.get("error")   || "unknown";
+  const errorDesc   = params.get("desc")    || null;   // raw SSO error_description
   const flowParam   = params.get("flow")    || "auth";
   const stepParam   = params.get("step")    ? parseInt(params.get("step")) : null;
   const cidParam    = params.get("cid")     || null;
@@ -259,7 +260,10 @@
 
   // ── Populate header ──────────────────────────────────────────────────────
   document.getElementById("errCode").textContent  = errorCode;
-  document.getElementById("errDesc").textContent  = ERROR_DESC[errorCode] || errorCode;
+  // Prefer the raw SSO error_description (may be in the server's locale, e.g. Persian);
+  // fall back to our own English mapping, then the raw code.
+  document.getElementById("errDesc").textContent  =
+    errorDesc || ERROR_DESC[errorCode] || errorCode;
   if (errorCode === "refresh_failed" || errorCode === "missing_token" || errorCode === "invalid_token" || errorCode === "session_not_found") {
     document.getElementById("errTitle").textContent = "Token Refresh Error";
     currentFlow = "refresh";

@@ -231,19 +231,24 @@ public static class ServiceCollectionExtensions
                         .GetRequiredService<ILoggerFactory>()
                         .CreateLogger("Brdp.Authentication.Oidc");
 
-                    string? errDesc = null;
-                    ctx.Properties?.Items.TryGetValue("error_description", out errDesc);
+                    // The OIDC handler buries the OAuth error code inside the exception
+                    // message as: "Message contains error: '<code>', error_description: '…'"
+                    // Extract it so the diagnostics page gets a clean code, not the full sentence.
+                    var rawMessage = ctx.Failure?.Message ?? string.Empty;
+                    var errorCode  = ExtractOidcErrorCode(rawMessage);
+                    var errorDesc  = ExtractOidcErrorDescription(rawMessage);
+
                     logger.LogError(ctx.Failure,
                         "SSO remote failure — error: {OidcError}, description: {OidcErrorDescription}",
-                        ctx.Failure?.Message, errDesc);
+                        errorCode, errorDesc);
 
                     // Redirect to the SPA diagnostics page with enough context for the admin
                     // to identify which step failed without reading server logs.
-                    var errorCode = Uri.EscapeDataString(ctx.Failure?.Message ?? "sso_error");
-                    var cid       = ctx.HttpContext.Response.Headers["X-Correlation-ID"].FirstOrDefault();
-                    var ts        = Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"));
-                    var url       = $"/error.html?error={errorCode}&flow=auth&step=3&ts={ts}";
-                    if (!string.IsNullOrEmpty(cid)) url += $"&cid={Uri.EscapeDataString(cid)}";
+                    var cid = ctx.HttpContext.Response.Headers["X-Correlation-ID"].FirstOrDefault();
+                    var ts  = Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"));
+                    var url = $"/error.html?error={Uri.EscapeDataString(errorCode)}&flow=auth&step=3&ts={ts}";
+                    if (!string.IsNullOrEmpty(errorDesc)) url += $"&desc={Uri.EscapeDataString(errorDesc)}";
+                    if (!string.IsNullOrEmpty(cid))       url += $"&cid={Uri.EscapeDataString(cid)}";
 
                     ctx.Response.Redirect(url);
                     ctx.HandleResponse();
@@ -271,5 +276,24 @@ public static class ServiceCollectionExtensions
             .AddApplicationPart(typeof(ServiceCollectionExtensions).Assembly);
 
         return services;
+    }
+
+    // ── OIDC error extraction helpers ─────────────────────────────────────────
+    // The ASP.NET Core OIDC handler formats remote failures as:
+    //   "Message contains error: '<code>', error_description: '<desc>', error_uri: '…'"
+    // These helpers pull the clean OAuth error code and description out of that sentence.
+
+    private static string ExtractOidcErrorCode(string message)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            message, @"error:\s*'([^']+)'");
+        return match.Success ? match.Groups[1].Value : "sso_error";
+    }
+
+    private static string? ExtractOidcErrorDescription(string message)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            message, @"error_description:\s*'([^']+)'");
+        return match.Success ? match.Groups[1].Value : null;
     }
 }
