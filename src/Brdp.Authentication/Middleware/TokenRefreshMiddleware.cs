@@ -41,12 +41,12 @@ public sealed class TokenRefreshMiddleware
 
     private static readonly HashSet<string> _skipPaths =
     [
-        "/auth/SignIn",
-        "/auth/SignInCallback",
-        "/auth/SignOutCallback",
-        "/auth/refresh-token",    // avoid recursion
-        "/signin-oidc",
-        "/signout-callback-oidc",
+        "/auth/signin",
+        "/auth/signin-callback",
+        "/auth/signout-callback",
+        "/auth/refresh-token",            // avoid recursion
+        "/auth/oidc-callback",
+        "/auth/oidc-signout-callback",
         "/health",
     ];
 

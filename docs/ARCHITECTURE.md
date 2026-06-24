@@ -46,7 +46,7 @@ Request
 ```
 
 It must run **after** `UseAuthentication()` (OIDC/Cookie handlers, which own the
-`/signin-oidc` callback) and **before** `MapControllers()`.
+`/auth/oidc-callback` path) and **before** `MapControllers()`.
 
 ### Authorization model
 
@@ -90,7 +90,131 @@ Both token refresh **and** branch upgrade rotate SSO tokens, so both run inside 
   401/`refresh_failed` rather than unhandled exceptions.
 - **Data Protection:** key ring persisted to Redis under `auth:dataprotection-keys`.
 
-## 7. Observability
+## 7. Complete authentication flow
+
+All routes, action names, and SPA pages involved in both flows.
+
+### Sign-in flow
+
+```
+SPA (browser)                 Gateway (BFF)                 OIDC middleware          SSO (TPS)
+─────────────────────────────────────────────────────────────────────────────────────────────────
+
+index.html
+  │  click "Sign in"
+  │──────────────────────────► GET /auth/signin
+  │                            AuthController.SignIn
+  │                            builds PKCE code_challenge
+  │                            302 → sso.tps.ir/oauth/authorize
+  │◄────────────────────────── (browser follows 302)
+  │
+  │  [user enters credentials at SSO]
+  │
+  │  SSO posts auth code ──────────────────────────────────► POST /auth/oidc-callback
+  │                                                          (OIDC middleware — CallbackPath)
+  │                                                          validates state + nonce cookies
+  │                                                          exchanges code for SSO tokens (PKCE)
+  │                                                          saves tokens into cookie
+  │                                                          302 → /auth/signin-callback
+  │◄──────────────────────────────────────────────────────── (browser follows 302)
+  │
+  │──────────────────────────► GET /auth/signin-callback
+  │                            AuthController.SignInCallback
+  │                            reads SSO tokens from cookie
+  │                            stores session → Redis
+  │                            issues BrdpToken (HS256 JWT)
+  │                            302 → /signin-complete.html#token=…&expiresAt=…
+  │◄──────────────────────────
+  ▼
+signin-complete.html
+  captures #token= from fragment
+  stores to localStorage
+  clears fragment from address bar
+  redirect → profile.html (1 s)
+  ▼
+profile.html
+  │──────────────────────────► GET /auth/userinfo
+  │                            AuthController.UserInfo
+  │◄──────────────────────────  { userCode, username, firstName, lastName,
+  │                               branchCode, sessionId, isBranchUser }
+  shows user profile
+```
+
+### Sign-out flow
+
+```
+profile.html
+  │  click "Sign out"
+  │──────────────────────────► POST /auth/signout
+  │                            AuthController.SignOut
+  │                            revokes SSO access token
+  │                            deletes Redis session (immediate logout)
+  │                            OIDC SignOut → SSO end_session
+  │
+  │  SSO global sign-out ──────────────────────────────────► GET /auth/oidc-signout-callback
+  │                                                          (OIDC middleware — SignedOutCallbackPath)
+  │                                                          clears SSO cookie
+  │                                                          302 → /auth/signout-callback
+  │◄──────────────────────────────────────────────────────── (browser follows 302)
+  │
+  │──────────────────────────► GET /auth/signout-callback
+  │                            AuthController.SignOutCallback
+  │◄──────────────────────────  { signedOut: true }
+  │
+  SPA clears localStorage
+  redirect → index.html
+```
+
+### Token refresh (transparent — no SPA action required)
+
+```
+profile.html / any page
+  │  API call with expired BrdpToken
+  │──────────────────────────► ANY endpoint
+  │                            TokenRefreshMiddleware (runs before BrdpAuthMiddleware)
+  │                            validates signature (ignores expiry)
+  │                            acquires Redis lock (single-flight per user)
+  │                            calls SSO refresh_token grant
+  │                            updates Redis session
+  │                            injects fresh token → Authorization header
+  │◄──────────────────────────  X-New-BrdpToken: <new-jwt>   (SPA replaces stored token)
+  │                             + original API response
+```
+
+### Error paths
+
+```
+ANY step fails
+  │
+  ▼
+/error.html?error=<code>&flow=auth|refresh&step=N&ts=…&cid=<correlation-id>
+  interactive sequence diagram (step in red, prior steps green, future steps grey)
+  per-step detail panel: available data · what to check · log pattern
+  one-click diagnostic report (copy to clipboard)
+```
+
+### Route reference
+
+| Route | Action | Who calls it |
+|---|---|---|
+| `GET  /auth/signin` | `AuthController.SignIn` | SPA (full-page redirect) |
+| `POST /auth/oidc-callback` | OIDC middleware (internal) | SSO (posts auth code) |
+| `GET  /auth/signin-callback` | `AuthController.SignInCallback` | OIDC middleware (302 after code exchange) |
+| `GET  /auth/userinfo` | `AuthController.UserInfo` | SPA (`authFetch`) |
+| `POST /auth/refresh-token` | `AuthController.RefreshToken` | SPA (explicit refresh) |
+| `POST /auth/signout` | `AuthController.SignOut` | SPA (`authFetch`) |
+| `GET  /auth/oidc-signout-callback` | OIDC middleware (internal) | SSO (post-logout redirect) |
+| `GET  /auth/signout-callback` | `AuthController.SignOutCallback` | OIDC middleware (302 after signout) |
+| `GET  /health` | Health check | Load balancer / readiness probe |
+
+| SPA page | Purpose | Reached from |
+|---|---|---|
+| `index.html` | Landing / sign-in button | Entry point, post-logout |
+| `signin-complete.html` | Captures BrdpToken from URL fragment | `AuthController.SignInCallback` (302) |
+| `profile.html` | Shows user data, sign-out | `signin-complete.html` (redirect) |
+| `error.html` | Auth error diagnostics + sequence diagram | `OnRemoteFailure`, `signin-complete.html`, `profile.html` |
+
+## 8. Observability
 
 Correlation has two layers (see [SPECS.md](SPECS.md) §Logging):
 

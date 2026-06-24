@@ -57,7 +57,9 @@ It must be called **after** `UseAuthentication()` (the OIDC/Cookie handlers) and
   session, *not* the ASP.NET authorization stack. There is intentionally no
   `UseAuthorization()` and no `[Authorize]`/`[AllowAnonymous]`. Anonymous routes are
   listed in the middleware's `_anonymousPaths`/`_skipPaths` sets — keep those in sync
-  with the controller routes.
+  with the controller routes. Current anonymous paths:
+  `/auth/signin`, `/auth/signin-callback`, `/auth/signout-callback`,
+  `/auth/refresh-token`, `/auth/oidc-callback`, `/auth/oidc-signout-callback`, `/health`.
 - **Redis keys** are built only via `RedisKeyHelper` (`auth:session:{sha256(username)}`,
   `auth:lock:{sha256(username)}`).
 - **Token rotation is single-flight per user** via `ExecuteWithRefreshLockAsync` — any

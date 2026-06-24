@@ -32,12 +32,12 @@ public sealed class BrdpAuthenticationMiddleware
     /// <summary>Paths that bypass authentication entirely.</summary>
     private static readonly HashSet<string> _anonymousPaths =
     [
-        "/auth/SignIn",
-        "/auth/SignInCallback",
-        "/auth/SignOutCallback",
-        "/auth/refresh-token",          // accepts expired tokens — handled internally
-        "/signin-oidc",           // ASP.NET Core OIDC middleware internal callback
-        "/signout-callback-oidc", // ASP.NET Core OIDC middleware internal signout
+        "/auth/signin",
+        "/auth/signin-callback",
+        "/auth/signout-callback",
+        "/auth/refresh-token",            // accepts expired tokens — handled internally
+        "/auth/oidc-callback",            // OIDC middleware: authorization-code exchange
+        "/auth/oidc-signout-callback",    // OIDC middleware: post-logout cleanup
         "/health",
     ];
 

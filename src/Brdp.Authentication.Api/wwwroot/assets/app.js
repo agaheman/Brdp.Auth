@@ -30,11 +30,11 @@ const Dotin = (() => {
     localStorage.removeItem(EXP_KEY);
   };
 
-  // Start the OIDC login flow. The gateway redirects back to /callback.html
+  // Start the OIDC login flow. The gateway redirects back to /signin-complete.html
   // with the issued BrdpToken in the URL fragment.
   const login = () => {
-    const returnUrl = "/callback.html";
-    window.location.href = `${API_BASE}/auth/SignIn?returnUrl=${encodeURIComponent(returnUrl)}`;
+    const returnUrl = "/signin-complete.html";
+    window.location.href = `${API_BASE}/auth/signin?returnUrl=${encodeURIComponent(returnUrl)}`;
   };
 
   // Fetch wrapper that injects the Bearer token and absorbs token rotation.

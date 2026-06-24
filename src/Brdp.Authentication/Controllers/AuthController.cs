@@ -55,12 +55,12 @@ public sealed class AuthController : ControllerBase
     /// authorization endpoint. After authentication SSO redirects to <c>/auth/SignInCallback</c>.
     /// </summary>
     [AllowAnonymous]
-    [HttpGet("SignIn")]
+    [HttpGet("signin")]
     public IActionResult SignIn([FromQuery] string returnUrl = "/")
         => Challenge(
             new AuthenticationProperties
             {
-                RedirectUri = $"/auth/SignInCallback?returnUrl={Uri.EscapeDataString(returnUrl)}"
+                RedirectUri = $"/auth/signin-callback?returnUrl={Uri.EscapeDataString(returnUrl)}"
             },
             SsoAuthenticationDefaults.OidcScheme);
 
@@ -73,7 +73,7 @@ public sealed class AuthController : ControllerBase
     /// Redis session, and issues a BrdpToken for the SPA.
     /// </summary>
     [AllowAnonymous]
-    [HttpGet("SignInCallback")]
+    [HttpGet("signin-callback")]
     public async Task<IActionResult> SignInCallback(
         [FromQuery] string returnUrl = "/",
         CancellationToken ct = default)
@@ -263,7 +263,7 @@ public sealed class AuthController : ControllerBase
     /// the OIDC end_session flow. SSO redirects the browser to <c>/auth/SignOutCallback</c>
     /// after completing global sign-out.
     /// </summary>
-    [HttpPost("SignOut")]
+    [HttpPost("signout")]
     public async Task<IActionResult> SignOut(CancellationToken ct = default)
     {
         var user    = _accessor.GetRequiredContext();
@@ -276,7 +276,7 @@ public sealed class AuthController : ControllerBase
         }
 
         return SignOut(
-            new AuthenticationProperties { RedirectUri = "/auth/SignOutCallback" },
+            new AuthenticationProperties { RedirectUri = "/auth/signout-callback" },
             SsoAuthenticationDefaults.CookieScheme,
             SsoAuthenticationDefaults.OidcScheme);
     }
@@ -289,7 +289,7 @@ public sealed class AuthController : ControllerBase
     /// SPA should detect this response and navigate to the login page.
     /// </summary>
     [AllowAnonymous]
-    [HttpGet("SignOutCallback")]
+    [HttpGet("signout-callback")]
     public IActionResult SignOutCallback() => Ok(new { signedOut = true });
 
     // ── Private helpers ───────────────────────────────────────────────────────

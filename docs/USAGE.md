@@ -12,7 +12,7 @@ builder.Services.AddBrdpAuthentication(builder.Configuration, builder.Environmen
 var app = builder.Build();
 
 app.UseHttpsRedirection();
-app.UseAuthentication();        // OIDC + Cookie handlers (own the /signin-oidc callback)
+app.UseAuthentication();        // OIDC + Cookie handlers (own the /auth/oidc-callback path)
 app.UseBrdpAuthentication();    // ForwardedHeaders → CORS → RateLimiter → Correlation
                                 // → TokenRefresh → BrdpAuthentication
 app.MapControllers();
@@ -72,9 +72,9 @@ public sealed class OrderService(IAuthenticatedUserContextAccessor accessor)
 
 ## 4. SPA integration
 
-1. **Login:** redirect the browser to `GET /auth/login?returnUrl=/dashboard`. After SSO,
-   the gateway returns `{ token, isBranchUser, expiresAt }` from `/auth/callback`. Store
-   the `token`.
+1. **Login:** redirect the browser to `GET /auth/signin?returnUrl=/signin-complete.html`.
+   After SSO the gateway redirects back with `#token=…&expiresAt=…&isBranchUser=…` in the
+   URL fragment. The fragment is captured client-side and never reaches a server.
 2. **Authenticated calls:** send `Authorization: Bearer <BrdpToken>`.
 3. **Transparent refresh:** on every response, check for `X-New-BrdpToken`; if present,
    replace the stored token. (Requires the gateway origin in `AllowedCorsOrigins` so the
@@ -83,7 +83,7 @@ public sealed class OrderService(IAuthenticatedUserContextAccessor accessor)
    the `Authorization` header → `{ token }`.
 5. **Branch users:** if `isBranchUser`, call `POST /branch/select { "branchCode": "..." }`
    and replace the stored token with the returned one.
-6. **Logout:** `POST /auth/logout`, then drop the stored token and redirect to login.
+6. **Logout:** `POST /auth/signout`, then drop the stored token and redirect to login.
 
 Example fetch wrapper:
 
