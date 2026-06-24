@@ -12,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace Brdp.Authentication.Extensions;
@@ -189,10 +190,13 @@ public static class ServiceCollectionExtensions
                 options.SaveTokens = true;  // Required: tokens stored in cookie for /auth/SignInCallback
                 options.GetClaimsFromUserInfoEndpoint = true;
 
-                var scopes = sso.GetSection("Scopes").Get<string[]>() ?? ["openid", "profile"];
+                var scopes = sso.GetSection("Scopes").Get<string[]>()
+                             ?? ["openid", "profile"];
                 options.Scope.Clear();
-                foreach (var scope in scopes)
-                    options.Scope.Add(scope);
+                foreach (var s in scopes.Where(s => !string.IsNullOrWhiteSpace(s)))
+                    options.Scope.Add(s);
+                if (!options.Scope.Contains("openid"))
+                    options.Scope.Add("openid"); // required by OIDC spec
 
                 options.RequireHttpsMetadata = environment.IsProduction();
 
@@ -214,6 +218,27 @@ public static class ServiceCollectionExtensions
                     var refreshExpiresIn = ctx.TokenEndpointResponse?.GetParameter("refresh_expires_in");
                     if (!string.IsNullOrEmpty(refreshExpiresIn) && ctx.Properties is not null)
                         ctx.Properties.Items["sso.refresh_expires_in"] = refreshExpiresIn;
+                    return Task.CompletedTask;
+                };
+
+                // When SSO returns an error (access_denied, invalid_request, server_error…)
+                // the OIDC middleware fires OnRemoteFailure before our action runs.
+                // Without this handler the exception surfaces as a 500. Instead: log it
+                // and redirect to the SPA callback page so the user sees a friendly message.
+                options.Events.OnRemoteFailure = ctx =>
+                {
+                    var logger = ctx.HttpContext.RequestServices
+                        .GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("Brdp.Authentication.Oidc");
+
+                    logger.LogError(ctx.Failure,
+                        "SSO remote failure — error: {OidcError}, description: {OidcErrorDescription}",
+                        ctx.Failure?.Message,
+                        ctx.Properties?.Items.TryGetValue("error_description", out var desc) == true ? desc : null);
+
+                    var errorCode = Uri.EscapeDataString(ctx.Failure?.Message ?? "sso_error");
+                    ctx.Response.Redirect($"/callback.html?error={errorCode}");
+                    ctx.HandleResponse(); // suppress the default exception response
                     return Task.CompletedTask;
                 };
             });

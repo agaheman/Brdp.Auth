@@ -46,13 +46,26 @@
   <script src="/assets/app.js"></script>
   <script>
     (function () {
+      // 1. SSO-side error — the gateway's OnRemoteFailure redirects here with ?error=...
+      const params = new URLSearchParams(location.search);
+      const ssoError = params.get("error");
+      if (ssoError) {
+        document.getElementById("failMsg").textContent =
+          "SSO error: " + decodeURIComponent(ssoError);
+        document.getElementById("fail").classList.remove("hidden");
+        return;
+      }
+
+      // 2. App-side success — BrdpToken arrives in the URL fragment
       const result = Dotin.captureTokenFromFragment();
       if (result && result.token) {
         document.getElementById("ok").classList.remove("hidden");
         setTimeout(() => { window.location.href = "/profile.html"; }, 1000);
-      } else {
-        document.getElementById("fail").classList.remove("hidden");
+        return;
       }
+
+      // 3. Nothing in fragment and no SSO error — gateway returned no token
+      document.getElementById("fail").classList.remove("hidden");
     })();
   </script>
 </body>
