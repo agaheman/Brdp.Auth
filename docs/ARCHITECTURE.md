@@ -19,6 +19,9 @@ browser while letting the SPA make authenticated calls.
 | Decision | Rationale |
 |---|---|
 | SPA holds BrdpToken only | SSO tokens never reach the browser |
+| **BrdpToken in `localStorage`, sent as `Authorization: Bearer`** | Immune to CSRF (browsers never auto-send a custom header). SSO tokens are server-side so XSS impact is limited to the short BrdpToken lifetime; Redis revocation terminates the session immediately. |
+| **No cookie for BrdpToken** | A cookie for BrdpToken would require CSRF protection on every state-changing endpoint. The Authorization-header model is simpler and safer here. |
+| BrdpToken delivered in URL fragment (`#token=…`) | Fragment is never sent to a server or written to access logs; captured client-side only. |
 | Redis is session source of truth | Deleting a key invalidates the user instantly, even with a valid JWT |
 | `Expiry(BrdpToken) == Expiry(SsoAccessToken)` | No SSO-token parsing on the hot path |
 | Redis TTL = RefreshToken expiry | Session survives access-token rotation |
@@ -26,6 +29,16 @@ browser while letting the SPA make authenticated calls.
 | Single Redis read per request | Auth middleware reads once; downstream reuses the accessor |
 | Single-flight refresh (distributed lock) | Single-use SSO refresh tokens can't be double-consumed across tabs |
 | Data Protection key ring in Redis | Encrypted sessions survive restarts and scale horizontally |
+
+### Note on cookies you see during the sign-in flow
+
+The browser temporarily holds three **httpOnly OIDC handshake cookies** during the authorization-code exchange:
+
+- `.AspNetCore.OpenIdConnect.Nonce.*` — binds the ID-token nonce to this browser session
+- `.AspNetCore.Correlation.*` — binds the state parameter to this browser session
+- `.AspNetCore.TpsSsoCookie` — holds the OIDC principal between `/auth/oidc-callback` and `/auth/signin-callback`
+
+All three are set by the ASP.NET Core OIDC middleware, are httpOnly (JS-inaccessible), and are consumed and discarded during the code exchange. **They are not the BrdpToken and are not used for ongoing authentication.**
 
 ## 3. Request pipeline
 

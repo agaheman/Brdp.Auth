@@ -77,3 +77,7 @@ It must be called **after** `UseAuthentication()` (the OIDC/Cookie handlers) and
 - Set `EncryptTokensAtRest=true` in production; the Data Protection key ring is persisted
   to Redis (`auth:dataprotection-keys`) so it survives restarts and is shared across
   instances.
+- **BrdpToken storage:** store in `localStorage`, send as `Authorization: Bearer`. Do not
+  put it in a cookie — that would require CSRF protection. The SSO tokens never reach the
+  browser (server-side Redis only), so XSS impact is bounded to the short BrdpToken
+  lifetime, and the Redis session can be deleted to revoke access immediately.

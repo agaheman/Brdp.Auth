@@ -72,10 +72,31 @@ public sealed class OrderService(IAuthenticatedUserContextAccessor accessor)
 
 ## 4. SPA integration
 
+### Token storage model
+
+Store the BrdpToken in **`localStorage`**. Do **not** use a cookie for it.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  DO  │  localStorage.setItem("dotin.brdpToken", token)           │
+│  DO  │  Authorization: Bearer <token>  on every API call         │
+│ DON'T│  document.cookie = "brdpToken=..."                        │
+│ DON'T│  withCredentials: true  on API calls (sends all cookies)  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Why localStorage + Bearer header:**
+- **CSRF immune** — browsers never auto-send the `Authorization` header; only your JS can.
+- **No CSRF tokens needed** on any endpoint.
+- **XSS risk is bounded** — if an attacker reads localStorage, they get a short-lived BrdpToken. The SSO access/refresh tokens are never in the browser; the Redis session can be deleted immediately to revoke access.
+
+### Integration steps
+
 1. **Login:** redirect the browser to `GET /auth/signin?returnUrl=/signin-complete.html`.
    After SSO the gateway redirects back with `#token=…&expiresAt=…&isBranchUser=…` in the
-   URL fragment. The fragment is captured client-side and never reaches a server.
-2. **Authenticated calls:** send `Authorization: Bearer <BrdpToken>`.
+   URL fragment. Capture from `window.location.hash`, store in `localStorage`, then clear
+   the fragment with `history.replaceState` so the token is not left in the address bar.
+2. **Authenticated calls:** send `Authorization: Bearer <token>` on every request.
 3. **Transparent refresh:** on every response, check for `X-New-BrdpToken`; if present,
    replace the stored token. (Requires the gateway origin in `AllowedCorsOrigins` so the
    header is readable cross-origin.)
@@ -83,7 +104,8 @@ public sealed class OrderService(IAuthenticatedUserContextAccessor accessor)
    the `Authorization` header → `{ token }`.
 5. **Branch users:** if `isBranchUser`, call `POST /branch/select { "branchCode": "..." }`
    and replace the stored token with the returned one.
-6. **Logout:** `POST /auth/signout`, then drop the stored token and redirect to login.
+6. **Logout:** `POST /auth/signout`, then `localStorage.removeItem("dotin.brdpToken")` and
+   redirect to the login page.
 
 Example fetch wrapper:
 
