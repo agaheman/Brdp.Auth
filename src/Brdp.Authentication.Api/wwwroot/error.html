@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auth Diagnostics · Dotin</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <style>
+    /* ── Diagnostic page overrides ────────────────────────────────────────── */
+    body { align-items: flex-start; padding: 20px; }
+
+    .diag-shell {
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* header strip */
+    .diag-header {
+      background: rgba(239,68,68,.12);
+      border: 1px solid rgba(239,68,68,.35);
+      border-radius: 10px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .diag-header svg { width: 28px; height: 28px; flex-shrink: 0; color: #ef4444; }
+    .diag-header h1 { font-size: 1rem; font-weight: 700; margin: 0 0 2px; }
+    .diag-header p  { margin: 0; font-size: .82rem; color: var(--muted); }
+    .error-code {
+      margin-left: auto;
+      font-family: monospace;
+      font-size: .82rem;
+      background: rgba(239,68,68,.15);
+      color: #ef4444;
+      padding: 4px 10px;
+      border-radius: 6px;
+      white-space: nowrap;
+    }
+
+    /* tabs */
+    .tabs { display: flex; gap: 6px; }
+    .tab {
+      padding: 7px 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.1);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .82rem;
+      font-family: inherit;
+      transition: background .15s;
+    }
+    .tab.active {
+      background: rgba(99,102,241,.2);
+      border-color: rgba(99,102,241,.5);
+      color: #a5b4fc;
+      font-weight: 600;
+    }
+
+    /* diagram card */
+    .diag-card {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px;
+      padding: 16px 12px;
+      overflow-x: auto;
+    }
+
+    /* legend */
+    .legend {
+      display: flex;
+      gap: 18px;
+      font-size: .75rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .legend span { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+    /* detail panel */
+    .detail-panel {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      padding: 16px 18px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .detail-panel.visible { display: flex; }
+    .detail-panel h3 { margin: 0; font-size: .95rem; }
+    .detail-panel p  { margin: 0; font-size: .82rem; color: var(--muted); line-height: 1.5; }
+
+    .detail-section { display: flex; flex-direction: column; gap: 6px; }
+    .detail-section label {
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+    }
+    .detail-section ul {
+      margin: 0; padding: 0 0 0 16px;
+      font-size: .82rem;
+      color: #cbd5e1;
+      line-height: 1.7;
+    }
+    .log-pattern {
+      font-family: monospace;
+      font-size: .78rem;
+      background: rgba(0,0,0,.3);
+      padding: 6px 10px;
+      border-radius: 6px;
+      color: #7dd3fc;
+      word-break: break-all;
+    }
+
+    /* diagnostic report */
+    .report-card {
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .report-card pre {
+      margin: 0;
+      font-size: .76rem;
+      color: #94a3b8;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .report-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .report-row label { font-size: .78rem; font-weight: 600; color: var(--muted); }
+    .copy-btn {
+      padding: 5px 12px;
+      background: rgba(99,102,241,.2);
+      border: 1px solid rgba(99,102,241,.4);
+      border-radius: 6px;
+      color: #a5b4fc;
+      font-size: .76rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .copy-btn:hover { background: rgba(99,102,241,.35); }
+  </style>
+</head>
+<body>
+<div class="diag-shell">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <div class="diag-header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M12 8v4"/><path d="M12 16h.01"/>
+    </svg>
+    <div>
+      <h1 id="errTitle">Authentication Error</h1>
+      <p id="errDesc">An error occurred during the authentication flow.</p>
+    </div>
+    <span class="error-code" id="errCode">—</span>
+  </div>
+
+  <!-- ── Flow tabs ────────────────────────────────────────────────────────── -->
+  <div class="tabs">
+    <button class="tab active" id="tabAuth"    onclick="switchFlow('auth')">Sign-In Flow</button>
+    <button class="tab"        id="tabRefresh" onclick="switchFlow('refresh')">Token Refresh Flow</button>
+  </div>
+
+  <!-- ── Sequence diagram ─────────────────────────────────────────────────── -->
+  <div class="diag-card">
+    <div class="legend">
+      <span><span class="dot" style="background:#22c55e"></span> Completed</span>
+      <span><span class="dot" style="background:#ef4444"></span> Failed here</span>
+      <span><span class="dot" style="background:#334155"></span> Not reached</span>
+      <span style="color:#6366f1;font-size:.72rem">↑ Click any step for details</span>
+    </div>
+    <svg id="seqSvg" style="min-width:580px;font-family:system-ui,sans-serif"></svg>
+  </div>
+
+  <!-- ── Step detail panel ────────────────────────────────────────────────── -->
+  <div class="detail-panel" id="detailPanel">
+    <h3 id="detailTitle"></h3>
+    <p  id="detailDesc"></p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;flex-wrap:wrap">
+      <div class="detail-section">
+        <label>Data available at this step</label>
+        <ul id="detailAvail"></ul>
+      </div>
+      <div class="detail-section">
+        <label>What to check if it fails here</label>
+        <ul id="detailCheck"></ul>
+      </div>
+    </div>
+    <div class="detail-section">
+      <label>Log pattern to search for</label>
+      <div class="log-pattern" id="detailLog"></div>
+    </div>
+  </div>
+
+  <!-- ── Diagnostic report ────────────────────────────────────────────────── -->
+  <div class="report-card">
+    <div class="report-row">
+      <label>Diagnostic snapshot</label>
+      <button class="copy-btn" onclick="copyReport()">Copy</button>
+    </div>
+    <pre id="reportPre"></pre>
+  </div>
+
+  <div class="foot" style="text-align:center;color:var(--muted);font-size:.75rem">
+    Brdp.Authentication · Auth Error Diagnostics
+    · <a href="/index.html" style="color:inherit">Back to sign in</a>
+  </div>
+</div>
+
+<script src="/assets/diag.js"></script>
+<script>
+  // ── Read URL params ──────────────────────────────────────────────────────
+  const params      = new URLSearchParams(location.search);
+  const errorCode   = params.get("error")   || "unknown";
+  const flowParam   = params.get("flow")    || "auth";
+  const stepParam   = params.get("step")    ? parseInt(params.get("step")) : null;
+  const cidParam    = params.get("cid")     || null;
+  const tsParam     = params.get("ts")      || new Date().toISOString();
+
+  let currentFlow   = flowParam;
+
+  // ── Error-code → human description ──────────────────────────────────────
+  const ERROR_DESC = {
+    access_denied:              "SSO rejected the authentication request. The user denied access or the client is not authorized.",
+    login_required:             "SSO requires the user to log in interactively (session expired at SSO side).",
+    interaction_required:       "SSO requires user interaction (MFA, consent, etc.) that cannot be done silently.",
+    unauthorized_client:        "This client_id is not allowed to use the requested grant type or redirect_uri.",
+    invalid_scope:              "One or more requested scopes are not registered for this client.",
+    server_error:               "SSO reported an internal server error.",
+    temporarily_unavailable:    "SSO is temporarily unavailable.",
+    oidc_authentication_failed: "The OIDC callback was received but the cookie authentication could not be completed (token exchange may have failed).",
+    invalid_grant:              "The authorization code or refresh token was rejected — it may have already been used or has expired.",
+    refresh_failed:             "The SSO refresh-token grant failed. The refresh token may be expired or already consumed.",
+    missing_token:              "No Bearer token was found in the Authorization header.",
+    invalid_token:              "The BrdpToken signature is invalid — the token was tampered with or issued with a different signing key.",
+    session_not_found:          "No active session was found in Redis for this user.",
+    lock_timeout:               "Could not acquire the per-user refresh lock within the timeout — another refresh may be stuck.",
+    no_token:                   "The gateway did not return a BrdpToken in the URL fragment. The callback completed without issuing a token.",
+    sso_error:                  "A general error was returned by the SSO server.",
+    unknown:                    "An unexpected error occurred in the authentication pipeline.",
+  };
+
+  // ── Populate header ──────────────────────────────────────────────────────
+  document.getElementById("errCode").textContent  = errorCode;
+  document.getElementById("errDesc").textContent  = ERROR_DESC[errorCode] || errorCode;
+  if (errorCode === "refresh_failed" || errorCode === "missing_token" || errorCode === "invalid_token" || errorCode === "session_not_found") {
+    document.getElementById("errTitle").textContent = "Token Refresh Error";
+    currentFlow = "refresh";
+  }
+
+  // ── Render diagram ───────────────────────────────────────────────────────
+  const svg = document.getElementById("seqSvg");
+  let   failedStep = stepParam || Diag.inferStep(errorCode, currentFlow);
+
+  function switchFlow(flow) {
+    currentFlow = flow;
+    document.getElementById("tabAuth").classList.toggle("active",    flow === "auth");
+    document.getElementById("tabRefresh").classList.toggle("active", flow === "refresh");
+    document.getElementById("detailPanel").classList.remove("visible");
+    failedStep = (flow === currentFlow && stepParam) ? stepParam : Diag.inferStep(errorCode, flow);
+    Diag.render(svg, failedStep, flow);
+    buildReport();
+  }
+
+  // Register step-click handler BEFORE first render
+  Diag.onStepClick = (step, idx, failIdx) => {
+    document.getElementById("detailTitle").textContent = step.title;
+    document.getElementById("detailDesc").textContent  = step.description;
+    document.getElementById("detailLog").textContent   = step.log;
+
+    const avail = document.getElementById("detailAvail");
+    avail.innerHTML = "";
+    step.available.forEach(a => { const li = document.createElement("li"); li.textContent = a; avail.appendChild(li); });
+
+    const check = document.getElementById("detailCheck");
+    check.innerHTML = "";
+    step.check.forEach(c => { const li = document.createElement("li"); li.textContent = c; check.appendChild(li); });
+
+    const panel = document.getElementById("detailPanel");
+    panel.classList.add("visible");
+
+    // Highlight failed vs clicked
+    const isFailed = idx === failIdx;
+    panel.style.borderColor = isFailed ? "rgba(239,68,68,.4)" : "rgba(255,255,255,.1)";
+    document.getElementById("detailTitle").style.color = isFailed ? "#ef4444" : "";
+  };
+
+  Diag.render(svg, failedStep, currentFlow);
+
+  // ── Diagnostic report ────────────────────────────────────────────────────
+  function buildReport() {
+    const steps = currentFlow === "refresh" ? Diag.REFRESH_STEPS : Diag.AUTH_STEPS;
+    const failStep = steps[failedStep - 1];
+    const report = [
+      `=== Brdp.Authentication Error Report ===`,
+      `Timestamp  : ${tsParam}`,
+      `Error code : ${errorCode}`,
+      `Flow       : ${currentFlow === "auth" ? "Sign-In (Authorization Code + PKCE)" : "Token Refresh"}`,
+      `Failed at  : Step ${failedStep || "?"} — ${failStep?.title || "unknown"}`,
+      cidParam ? `Correlation: ${cidParam}` : null,
+      ``,
+      `Description:`,
+      `  ${ERROR_DESC[errorCode] || errorCode}`,
+      ``,
+      `Log pattern to search for:`,
+      `  ${failStep?.log || "—"}`,
+      ``,
+      `What to check:`,
+      ...(failStep?.check || []).map(c => `  • ${c}`),
+      ``,
+      `=== Paste this into a support ticket ===`,
+    ].filter(l => l !== null).join("\n");
+
+    document.getElementById("reportPre").textContent = report;
+  }
+
+  buildReport();
+
+  function copyReport() {
+    navigator.clipboard.writeText(document.getElementById("reportPre").textContent)
+      .then(() => {
+        const btn = document.querySelector(".copy-btn");
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = "Copy"; }, 1800);
+      });
+  }
+</script>
+</body>
+</html>

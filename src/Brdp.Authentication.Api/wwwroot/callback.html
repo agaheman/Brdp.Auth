@@ -46,13 +46,18 @@
   <script src="/assets/app.js"></script>
   <script>
     (function () {
-      // 1. SSO-side error — the gateway's OnRemoteFailure redirects here with ?error=...
+      // 1. SSO-side error — OnRemoteFailure redirects here with ?error=...&flow=auth
       const params = new URLSearchParams(location.search);
       const ssoError = params.get("error");
       if (ssoError) {
-        document.getElementById("failMsg").textContent =
-          "SSO error: " + decodeURIComponent(ssoError);
-        document.getElementById("fail").classList.remove("hidden");
+        // Forward to the diagnostics page with all available context
+        const diagParams = new URLSearchParams({
+          error: ssoError,
+          flow:  params.get("flow") || "auth",
+          ts:    new Date().toISOString(),
+        });
+        if (params.get("cid")) diagParams.set("cid", params.get("cid"));
+        window.location.replace("/error.html?" + diagParams);
         return;
       }
 
@@ -64,8 +69,8 @@
         return;
       }
 
-      // 3. Nothing in fragment and no SSO error — gateway returned no token
-      document.getElementById("fail").classList.remove("hidden");
+      // 3. No token and no SSO error — gateway didn't issue a token
+      window.location.replace("/error.html?error=no_token&flow=auth&ts=" + encodeURIComponent(new Date().toISOString()));
     })();
   </script>
 </body>

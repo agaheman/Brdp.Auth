@@ -95,7 +95,12 @@
 
       if (res.status === 401) {
         Dotin.clearSession();
-        return fail("Your session has expired or was revoked.");
+        const errHeader = res.headers.get("X-Auth-Error") || "session_not_found";
+        window.location.replace(
+          "/error.html?error=" + encodeURIComponent(errHeader) +
+          "&flow=refresh&ts=" + encodeURIComponent(new Date().toISOString())
+        );
+        return;
       }
       if (!res.ok) return fail(`Unexpected response (${res.status}).`);
 

@@ -231,14 +231,22 @@ public static class ServiceCollectionExtensions
                         .GetRequiredService<ILoggerFactory>()
                         .CreateLogger("Brdp.Authentication.Oidc");
 
+                    string? errDesc = null;
+                    ctx.Properties?.Items.TryGetValue("error_description", out errDesc);
                     logger.LogError(ctx.Failure,
                         "SSO remote failure — error: {OidcError}, description: {OidcErrorDescription}",
-                        ctx.Failure?.Message,
-                        ctx.Properties?.Items.TryGetValue("error_description", out var desc) == true ? desc : null);
+                        ctx.Failure?.Message, errDesc);
 
+                    // Redirect to the SPA diagnostics page with enough context for the admin
+                    // to identify which step failed without reading server logs.
                     var errorCode = Uri.EscapeDataString(ctx.Failure?.Message ?? "sso_error");
-                    ctx.Response.Redirect($"/callback.html?error={errorCode}");
-                    ctx.HandleResponse(); // suppress the default exception response
+                    var cid       = ctx.HttpContext.Response.Headers["X-Correlation-ID"].FirstOrDefault();
+                    var ts        = Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"));
+                    var url       = $"/error.html?error={errorCode}&flow=auth&step=3&ts={ts}";
+                    if (!string.IsNullOrEmpty(cid)) url += $"&cid={Uri.EscapeDataString(cid)}";
+
+                    ctx.Response.Redirect(url);
+                    ctx.HandleResponse();
                     return Task.CompletedTask;
                 };
             });
