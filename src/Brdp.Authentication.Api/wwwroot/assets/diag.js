@@ -158,6 +158,8 @@ const Diag = (() => {
       unauthorized_client: 3, invalid_scope: 3, server_error: 3,
       state_mismatch: 4, nonce_mismatch: 4, correlation_failed: 4,
       oidc_authentication_failed: 5, invalid_grant: 5,
+      // SSO returns "Internal Server Error" at the token endpoint (code exchange)
+      "internal server error": 5, "Internal Server Error": 5,
       session_save_failed: 6, claim_missing: 6,
       no_token: 7, sso_error: 3,
     },

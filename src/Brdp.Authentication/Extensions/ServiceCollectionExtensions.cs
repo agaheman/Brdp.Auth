@@ -242,11 +242,15 @@ public static class ServiceCollectionExtensions
                         "SSO remote failure — error: {OidcError}, description: {OidcErrorDescription}",
                         errorCode, errorDesc);
 
+                    // Detect whether the failure came from the token endpoint (step 5 — code exchange)
+                    // or from the authorization response itself (step 3 — SSO user auth).
+                    var failedStep = ctx.Failure?.StackTrace?.Contains("RedeemAuthorizationCode") == true ? 5 : 3;
+
                     // Redirect to the SPA diagnostics page with enough context for the admin
                     // to identify which step failed without reading server logs.
                     var cid = ctx.HttpContext.Response.Headers["X-Correlation-ID"].FirstOrDefault();
                     var ts  = Uri.EscapeDataString(DateTimeOffset.UtcNow.ToString("O"));
-                    var url = $"/error.html?error={Uri.EscapeDataString(errorCode)}&flow=auth&step=3&ts={ts}";
+                    var url = $"/error.html?error={Uri.EscapeDataString(errorCode)}&flow=auth&step={failedStep}&ts={ts}";
                     if (!string.IsNullOrEmpty(errorDesc)) url += $"&desc={Uri.EscapeDataString(errorDesc)}";
                     if (!string.IsNullOrEmpty(cid))       url += $"&cid={Uri.EscapeDataString(cid)}";
 
