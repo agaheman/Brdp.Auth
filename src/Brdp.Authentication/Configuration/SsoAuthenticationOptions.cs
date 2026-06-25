@@ -60,15 +60,23 @@ public sealed class SsoAuthenticationOptions
     /// </summary>
     public bool SkipAtHashValidation { get; init; }
 
-    /// <summary>Token endpoint — derived from <see cref="Authority"/> if not set explicitly.</summary>
-    public string TokenEndpoint => $"{Authority.TrimEnd('/')}/protocol/openid-connect/token";
-
-    /// <summary>Revocation endpoint.</summary>
-    public string RevocationEndpoint => $"{Authority.TrimEnd('/')}/protocol/openid-connect/revoke";
+    // ── Endpoint paths (relative to Authority) — TPS SSO uses /oauth/* not Keycloak paths ──
+    public string TokenEndpointPath      { get; init; } = "/oauth/token";
+    public string RevocationEndpointPath { get; init; } = "/revoke";
+    public string EndSessionEndpointPath { get; init; } = "/oauth/endsession";
 
     /// <summary>
-    /// Custom upgrade endpoint on the TPS SSO for branch-token enrichment.
-    /// POST with current access_token + branch_code → returns enriched tokens.
+    /// Absolute URL the SSO redirects the browser back to after global sign-out
+    /// (sent as <c>post_logout_redirect_uri</c>). e.g. <c>https://host/index.html</c>.
     /// </summary>
-    public string UpgradeTokenEndpoint { get; init; } = "/protocol/openid-connect/token/upgrade";
+    public string LogoutRedirectUrl { get; init; } = "";
+
+    /// <summary>Token endpoint — also used for refresh_token and upgrade_token grants.</summary>
+    public string TokenEndpoint      => $"{Authority.TrimEnd('/')}{TokenEndpointPath}";
+
+    /// <summary>Token revocation endpoint.</summary>
+    public string RevocationEndpoint => $"{Authority.TrimEnd('/')}{RevocationEndpointPath}";
+
+    /// <summary>End-session (sign-out) endpoint — TPS SSO exposes a URL, not an API.</summary>
+    public string EndSessionEndpoint => $"{Authority.TrimEnd('/')}{EndSessionEndpointPath}";
 }

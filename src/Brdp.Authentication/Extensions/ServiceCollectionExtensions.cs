@@ -92,6 +92,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISessionService, SessionService>();
         services.AddSingleton<IBrdpTokenService, BrdpTokenService>();
         services.AddScoped<ISsoTokenService, SsoTokenService>();
+        services.AddScoped<ITokenUpgradeService, TokenUpgradeService>();
         services.AddScoped<IBranchService, BranchService>();
 
         // ── SSO HTTP Client ───────────────────────────────────────────────────

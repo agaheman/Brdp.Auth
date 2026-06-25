@@ -56,6 +56,14 @@
         <dt>Session ID</dt>  <dd id="sessionId">—</dd>
       </dl>
 
+      <a id="upgradeBtn" class="btn btn-secondary" href="/branch.html" style="margin-bottom:12px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
+        </svg>
+        Upgrade token · select branch
+      </a>
+
       <button id="logoutBtn" class="btn btn-ghost" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -123,13 +131,22 @@
     async function logout() {
       $("logoutBtn").disabled = true;
       $("logoutBtn").textContent = "Signing out…";
+
+      // 1. Sign out of Brdp first (server revokes + deletes the session) and get the
+      //    SSO sign-out URL. 2. Navigate the browser there so the SSO clears its session
+      //    too; it then redirects back to LogoutRedirectUrl.
+      let ssoSignOutUrl = "/index.html";
       try {
-        await Dotin.authFetch("/auth/signout", { method: "POST", redirect: "manual" });
+        const res = await Dotin.authFetch("/auth/signout", { method: "POST" });
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data.signOutUrl) ssoSignOutUrl = data.signOutUrl;
+        }
       } catch (_) {
         /* session is already gone server-side; ignore transport errors */
       } finally {
         Dotin.clearSession();
-        window.location.href = "/index.html";
+        window.location.href = ssoSignOutUrl;
       }
     }
 

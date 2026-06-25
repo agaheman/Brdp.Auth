@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Select Branch · Dotin Authentication Sample</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <main class="card stack">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2 4 5v6c0 5 3.4 8.4 8 11 4.6-2.6 8-6 8-11V5l-8-3Z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      </div>
+      <div>
+        <h1>Upgrade token</h1>
+        <p class="subtitle">Select a branch</p>
+      </div>
+    </div>
+
+    <p class="lead">
+      Choose a branch. The gateway calls the SSO <code>upgrade_token</code> grant,
+      embeds the branch code in a new token, updates your session, and re-issues your
+      BrdpToken.
+    </p>
+
+    <div>
+      <label class="field-label" for="branch">Branch</label>
+      <select id="branch" class="select">
+        <option value="1">۱ — شعبه ستاد (Head Office)</option>
+        <option value="101">۱۰۱ — شعبه مرکزی (Central)</option>
+        <option value="205">۲۰۵ — شعبه ولیعصر (Valiasr)</option>
+      </select>
+    </div>
+
+    <button id="applyBtn" class="btn btn-primary" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
+      </svg>
+      Apply upgrade
+    </button>
+
+    <div id="msg" class="alert alert-err hidden">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+      <span id="msgText"></span>
+    </div>
+
+    <a class="link center" href="/profile.html" style="display:block">← Back to profile</a>
+
+    <div class="foot">Token Upgrade feature · <code>POST /branch/select</code></div>
+  </main>
+
+  <script src="/assets/app.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    if (!Dotin.getToken()) window.location.replace("/index.html");
+
+    function fail(text) {
+      $("msgText").textContent = text;
+      $("msg").classList.remove("hidden");
+    }
+
+    async function apply() {
+      $("msg").classList.add("hidden");
+      $("applyBtn").disabled = true;
+      $("applyBtn").textContent = "Upgrading…";
+      try {
+        const branchCode = $("branch").value;
+        await Dotin.selectBranch(branchCode);
+        // New token (with branch claim) is stored — return to profile to see it.
+        window.location.href = "/profile.html";
+      } catch (e) {
+        fail(e.message || "Could not upgrade the token.");
+        $("applyBtn").disabled = false;
+        $("applyBtn").textContent = "Apply upgrade";
+      }
+    }
+
+    $("applyBtn").addEventListener("click", apply);
+  </script>
+</body>
+</html>

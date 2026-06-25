@@ -33,19 +33,22 @@ public sealed class AuthController : ControllerBase
     private readonly ISsoTokenService                  _ssoTokens;
     private readonly IAuthenticatedUserContextAccessor _accessor;
     private readonly AuthenticationOptions             _authOptions;
+    private readonly SsoAuthenticationOptions          _ssoOptions;
 
     public AuthController(
-        ISessionService                   sessions,
-        IBrdpTokenService                 brdpTokens,
-        ISsoTokenService                  ssoTokens,
-        IAuthenticatedUserContextAccessor accessor,
-        IOptions<AuthenticationOptions>   authOptions)
+        ISessionService                    sessions,
+        IBrdpTokenService                  brdpTokens,
+        ISsoTokenService                   ssoTokens,
+        IAuthenticatedUserContextAccessor  accessor,
+        IOptions<AuthenticationOptions>    authOptions,
+        IOptions<SsoAuthenticationOptions> ssoOptions)
     {
         _sessions    = sessions;
         _brdpTokens  = brdpTokens;
         _ssoTokens   = ssoTokens;
         _accessor    = accessor;
         _authOptions = authOptions.Value;
+        _ssoOptions  = ssoOptions.Value;
     }
 
     // ── Login ─────────────────────────────────────────────────────────────────
@@ -260,9 +263,13 @@ public sealed class AuthController : ControllerBase
     // ── Logout ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Revokes the SSO access token, deletes the Redis session, and triggers
-    /// the OIDC end_session flow. SSO redirects the browser to <c>/auth/SignOutCallback</c>
-    /// after completing global sign-out.
+    /// Signs out of the BFF first (revoke SSO access token, delete the Redis session,
+    /// clear the local OIDC cookie), then returns the SSO end-session URL.
+    ///
+    /// TPS SSO has no sign-out API — only a sign-out URL — so we cannot drive the OIDC
+    /// end_session flow server-side. The SPA must navigate the browser to the returned
+    /// <c>signOutUrl</c>; the SSO clears its session and redirects to
+    /// <c>SsoAuthentication:LogoutRedirectUrl</c>.
     /// </summary>
     [HttpPost("signout")]
     public async Task<IActionResult> SignOut(CancellationToken ct = default)
@@ -270,16 +277,22 @@ public sealed class AuthController : ControllerBase
         var user    = _accessor.GetRequiredContext();
         var session = await _sessions.GetByUsernameAsync(user.Username, ct).ConfigureAwait(false);
 
+        // 1. Sign out of Brdp first: revoke at SSO (best-effort) + delete the session.
         if (session is not null)
         {
             await _ssoTokens.RevokeAsync(session.SsoAccessToken, ct).ConfigureAwait(false);
             await _sessions.DeleteAsync(user.Username, ct).ConfigureAwait(false);
         }
 
-        return SignOut(
-            new AuthenticationProperties { RedirectUri = "/auth/signout-callback" },
-            SsoAuthenticationDefaults.CookieScheme,
-            SsoAuthenticationDefaults.OidcScheme);
+        // 2. Clear the local OIDC cookie.
+        await HttpContext.SignOutAsync(SsoAuthenticationDefaults.CookieScheme).ConfigureAwait(false);
+
+        // 3. Hand the browser the SSO sign-out URL (DotinSso exposes a URL, not an API).
+        var signOutUrl = _ssoOptions.EndSessionEndpoint;
+        if (!string.IsNullOrWhiteSpace(_ssoOptions.LogoutRedirectUrl))
+            signOutUrl += $"?post_logout_redirect_uri={Uri.EscapeDataString(_ssoOptions.LogoutRedirectUrl)}";
+
+        return Ok(new { signOutUrl });
     }
 
     // ── SignedOut ─────────────────────────────────────────────────────────────

@@ -18,8 +18,9 @@ internal sealed class SsoTokenService : ISsoTokenService
     public Task<SsoTokenResponse?> RefreshAsync(string refreshToken, CancellationToken ct = default) =>
         _client.RefreshTokenAsync(refreshToken, ct);
 
-    public Task<SsoTokenResponse?> UpgradeAsync(string accessToken, string branchCode, CancellationToken ct = default) =>
-        _client.UpgradeTokenAsync(accessToken, branchCode, ct);
+    public Task<SsoTokenResponse?> UpgradeAsync(
+        string accessToken, IReadOnlyDictionary<string, object?> clientClaims, CancellationToken ct = default) =>
+        _client.UpgradeTokenAsync(accessToken, clientClaims, ct);
 
     public Task RevokeAsync(string accessToken, CancellationToken ct = default) =>
         _client.RevokeTokenAsync(accessToken, ct);

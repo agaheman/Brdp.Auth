@@ -31,6 +31,10 @@ public static class SsoAccessTokenParser
     public static string? ExtractBranchCode(string accessToken)
         => ReadClaim(accessToken, "branch_code");
 
+    /// <summary>Reads the token's <c>jti</c> (unique id), required by the upgrade_token grant.</summary>
+    public static string? ExtractJti(string accessToken)
+        => new JwtSecurityToken(accessToken).Id;
+
     private static string? ReadClaim(string accessToken, string claimType)
     {
         var jwt = new JwtSecurityToken(accessToken);

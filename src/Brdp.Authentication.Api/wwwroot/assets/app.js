@@ -77,8 +77,26 @@ const Dotin = (() => {
     return (username || "?").slice(0, 2).toUpperCase();
   };
 
+  // Use the Token Upgrade feature to select a branch: POST /branch/select →
+  // gateway upgrades the SSO token, updates the session, returns a new BrdpToken
+  // (with the branch claim). We replace the stored token with it.
+  const selectBranch = async (branchCode) => {
+    const res = await authFetch("/branch/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branchCode }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Branch upgrade failed (${res.status}).`);
+    }
+    const data = await res.json();
+    setSession(data.token, data.expiresAt);
+    return data; // { token, branchCode, expiresAt }
+  };
+
   return {
     API_BASE, login, authFetch, getToken, getExpiry,
-    setSession, clearSession, captureTokenFromFragment, initials,
+    setSession, clearSession, captureTokenFromFragment, initials, selectBranch,
   };
 })();

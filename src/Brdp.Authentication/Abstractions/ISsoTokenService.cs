@@ -14,9 +14,13 @@ public interface ISsoTokenService
     Task<SsoTokenResponse?> RefreshAsync(string refreshToken, CancellationToken ct = default);
 
     /// <summary>
-    /// Call the SSO upgrade endpoint to obtain a token enriched with branch information.
+    /// Call the SSO <c>upgrade_token</c> grant to obtain a token enriched with the given
+    /// client claims (e.g. branch info). The claims are echoed into the new token.
     /// </summary>
-    Task<SsoTokenResponse?> UpgradeAsync(string accessToken, string branchCode, CancellationToken ct = default);
+    Task<SsoTokenResponse?> UpgradeAsync(
+        string accessToken,
+        IReadOnlyDictionary<string, object?> clientClaims,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Revoke the access token at the SSO server (logout).
