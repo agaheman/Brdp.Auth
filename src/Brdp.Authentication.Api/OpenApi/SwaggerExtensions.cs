@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.OpenApi;
-using Microsoft.OpenApi.Models;
 
 namespace Brdp.Authentication.Api.OpenApi;
 
@@ -17,23 +16,18 @@ public static class SwaggerExtensions
     {
         services.AddOpenApi(options =>
         {
-            options.AddDocumentTransformer<BearerSecurityTransformer>();
-
             options.AddDocumentTransformer((doc, _, _) =>
             {
-                doc.Info = new OpenApiInfo
-                {
-                    Title       = "Brdp Authentication API",
-                    Version     = "v1",
-                    Description =
-                        "BFF (Backend-For-Frontend) authentication gateway.\n\n" +
-                        "**How to authenticate:**\n" +
-                        "1. Open `/index.html` and complete the SSO sign-in flow.\n" +
-                        "2. Copy your BrdpToken from the browser console:\n" +
-                        "   `localStorage.getItem('dotin.brdpToken')`\n" +
-                        "3. Click **Authorize** (padlock icon), paste the token, click **Authorize**.\n" +
-                        "4. All requests from Swagger UI will carry `Authorization: Bearer <token>`.",
-                };
+                doc.Info.Title       = "Brdp Authentication API";
+                doc.Info.Version     = "v1";
+                doc.Info.Description =
+                    "BFF (Backend-For-Frontend) authentication gateway.\n\n" +
+                    "**Authentication is automatic** — if you have signed in via `/index.html` " +
+                    "your BrdpToken is already in `localStorage` and every request from this UI " +
+                    "will include `Authorization: Bearer <token>` automatically.\n\n" +
+                    "If you need to set the token manually, run in the browser console:\n" +
+                    "`localStorage.getItem('dotin.brdpToken')`";
+
                 return Task.CompletedTask;
             });
         });
@@ -48,7 +42,9 @@ public static class SwaggerExtensions
         // Built-in OpenAPI document endpoint: GET /openapi/v1.json
         app.MapOpenApi();
 
-        // Swagger UI served from CDN — no extra NuGet package required.
+        // Swagger UI served from unpkg CDN — no extra NuGet packages required.
+        // The requestInterceptor auto-attaches the BrdpToken from localStorage so
+        // the user never needs to click Authorize and paste a token manually.
         app.MapGet("/swagger", () => Results.Content(SwaggerUiHtml(OpenApiRoute), "text/html"))
            .ExcludeFromDescription();
 
@@ -74,15 +70,40 @@ public static class SwaggerExtensions
           <div id="swagger-ui"></div>
           <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
           <script>
+            const TOKEN_KEY = "dotin.brdpToken";
+
             SwaggerUIBundle({
               url: "{{openApiJsonUrl}}",
               dom_id: "#swagger-ui",
               presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
               layout: "StandaloneLayout",
-              persistAuthorization: true,
               displayRequestDuration: true,
               defaultModelsExpandDepth: -1,
               tryItOutEnabled: true,
+
+              // Auto-inject BrdpToken from localStorage on every request.
+              // No need to click Authorize — just sign in via /index.html first.
+              requestInterceptor: (request) => {
+                const token = localStorage.getItem(TOKEN_KEY);
+                if (token) {
+                  request.headers["Authorization"] = "Bearer " + token;
+                }
+                return request;
+              },
+
+              // Show the active token status in the UI description area.
+              onComplete: () => {
+                const token = localStorage.getItem(TOKEN_KEY);
+                const banner = document.createElement("div");
+                banner.style.cssText =
+                  "background:#1a3a1a;border:1px solid #22c55e;border-radius:6px;" +
+                  "padding:10px 16px;margin:12px 16px;font-size:13px;color:#86efac;font-family:monospace";
+                banner.textContent = token
+                  ? "✓ BrdpToken loaded from localStorage — requests are pre-authenticated."
+                  : "⚠ No BrdpToken in localStorage. Sign in via /index.html first.";
+                const info = document.querySelector(".swagger-ui .information-container");
+                if (info) info.after(banner);
+              },
             });
           </script>
         </body>
