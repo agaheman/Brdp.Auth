@@ -71,6 +71,13 @@ public sealed class SsoAuthenticationOptions
     /// </summary>
     public string LogoutRedirectUrl { get; init; } = "";
 
+    /// <summary>
+    /// Timeout (seconds) for backchannel calls to the SSO (refresh / upgrade / revoke).
+    /// The first connection to sso.tps.ir is slow (~15s TLS handshake), so the default
+    /// matches the OIDC handler's 60s backchannel timeout rather than a tight value.
+    /// </summary>
+    public int HttpTimeoutSeconds { get; init; } = 60;
+
     /// <summary>Token endpoint — also used for refresh_token and upgrade_token grants.</summary>
     public string TokenEndpoint      => $"{Authority.TrimEnd('/')}{TokenEndpointPath}";
 

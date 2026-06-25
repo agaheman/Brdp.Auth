@@ -104,8 +104,12 @@ public static class ServiceCollectionExtensions
                     .GetValue<string>("Authority")
                     ?? throw new InvalidOperationException("SsoAuthentication:Authority is required.");
 
+                var timeout = configuration
+                    .GetSection(SsoAuthenticationOptions.SectionName)
+                    .GetValue<int?>("HttpTimeoutSeconds") ?? 60;
+
                 client.BaseAddress = new Uri(authority);
-                client.Timeout = TimeSpan.FromSeconds(15);
+                client.Timeout = TimeSpan.FromSeconds(timeout);
             });
 
         // Same untrusted-CA bypass for the SSO HTTP client (token refresh / revoke calls).

@@ -109,8 +109,9 @@ internal sealed class SsoHttpClient
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("SSO token request to {Endpoint} returned {StatusCode}",
-                    endpoint, response.StatusCode);
+                var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                _logger.LogWarning("SSO token request to {Endpoint} returned {StatusCode}: {Body}",
+                    endpoint, response.StatusCode, body);
                 return null;
             }
 
