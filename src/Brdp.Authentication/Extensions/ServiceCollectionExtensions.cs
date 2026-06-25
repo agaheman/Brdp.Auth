@@ -197,6 +197,23 @@ public static class ServiceCollectionExtensions
 
                 options.RequireHttpsMetadata = environment.IsProduction();
 
+                // Some SSO servers compute the id_token's at_hash claim incorrectly,
+                // making the compliant .NET validator reject a valid login (IDX21348).
+                // When configured, swap in a validator that skips only the at_hash check;
+                // the id_token signature is still fully validated.
+                if (sso.GetValue<bool>("SkipAtHashValidation"))
+                {
+                    // Preserve the handler's default validator settings (ASP.NET Core sets
+                    // RequireStateValidation=false and NonceLifetime=60m) — only at_hash changes.
+                    var defaults = options.ProtocolValidator;
+                    options.ProtocolValidator = new NoAtHashProtocolValidator
+                    {
+                        RequireStateValidation = defaults.RequireStateValidation,
+                        RequireNonce           = defaults.RequireNonce,
+                        NonceLifetime          = defaults.NonceLifetime,
+                    };
+                }
+
                 // In non-production the SSO server may use an internal/self-signed CA.
                 // Bypass TLS validation only for the OIDC backchannel (metadata + token endpoint).
                 if (!environment.IsProduction())

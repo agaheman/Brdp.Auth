@@ -20,6 +20,16 @@ public sealed class SsoAuthenticationOptions
     public string   CallbackPath           { get; init; } = "/signin-oidc";
     public string   SignedOutCallbackPath  { get; init; } = "/signout-callback-oidc";
 
+    /// <summary>
+    /// Skip OIDC <c>at_hash</c> (access-token hash) validation of the id_token.
+    /// Some SSO servers compute <c>at_hash</c> incorrectly, which makes the
+    /// fully-compliant .NET validator reject an otherwise-valid login
+    /// (error IDX21348). Set <c>true</c> to tolerate such servers. The id_token
+    /// signature itself is still fully validated — only the access-token binding
+    /// check is skipped.
+    /// </summary>
+    public bool SkipAtHashValidation { get; init; }
+
     /// <summary>Token endpoint — derived from <see cref="Authority"/> if not set explicitly.</summary>
     public string TokenEndpoint => $"{Authority.TrimEnd('/')}/protocol/openid-connect/token";
 
