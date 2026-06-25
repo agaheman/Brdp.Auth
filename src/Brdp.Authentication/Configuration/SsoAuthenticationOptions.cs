@@ -29,6 +29,13 @@ public sealed class SsoAuthenticationOptions
     public bool UsePkce { get; init; } = true;
 
     /// <summary>
+    /// Call the OIDC userinfo endpoint to enrich the principal. Default <c>true</c>.
+    /// Set <c>false</c> when the SSO userinfo response omits the <c>sub</c> claim
+    /// (handler throws IDX21345); identity is then read from the id_token instead.
+    /// </summary>
+    public bool GetClaimsFromUserInfoEndpoint { get; init; } = true;
+
+    /// <summary>
     /// Authenticate at the token endpoint with a signed JWT client assertion
     /// (<c>client_secret_jwt</c>, RFC 7523) instead of sending the secret as a plain
     /// form field. Required when the SSO client's token_endpoint_auth_method is

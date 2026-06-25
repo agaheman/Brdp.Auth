@@ -192,7 +192,11 @@ public static class ServiceCollectionExtensions
                 options.CallbackPath = sso["CallbackPath"] ?? "/signin-oidc";
                 options.SignedOutCallbackPath = sso["SignedOutCallbackPath"] ?? "/signout-callback-oidc";
                 options.SaveTokens = true;  // Required: tokens stored in cookie for /auth/SignInCallback
-                options.GetClaimsFromUserInfoEndpoint = true;
+
+                // Default true (standard OIDC). Some SSO userinfo endpoints omit the
+                // 'sub' claim, which makes the handler throw IDX21345 — disable it and
+                // read identity from the id_token instead.
+                options.GetClaimsFromUserInfoEndpoint = sso.GetValue("GetClaimsFromUserInfoEndpoint", true);
 
                 // PKCE on by default; some confidential-client servers reject the
                 // client_secret + code_verifier combination, so it can be disabled.
