@@ -1,5 +1,6 @@
 using Brdp.Authentication.Abstractions;
 using Brdp.Authentication.Configuration;
+using Brdp.Authentication.Infrastructure;
 using Brdp.Authentication.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -82,23 +83,23 @@ public sealed class AuthController : ControllerBase
         if (!result.Succeeded)
             return Unauthorized(new { error = "oidc_authentication_failed" });
 
-        var principal = result.Principal!;
-
-        var userCode = principal.FindFirst("userCode")?.Value
-                    ?? principal.FindFirst("sub")?.Value
-                    ?? throw new InvalidOperationException("userCode/sub claim missing from SSO token.");
-
-        var username = principal.FindFirst("preferred_username")?.Value
-                    ?? principal.Identity?.Name
-                    ?? throw new InvalidOperationException("preferred_username claim missing from SSO token.");
-
-        var firstName    = principal.FindFirst("given_name")?.Value  ?? string.Empty;
-        var lastName     = principal.FindFirst("family_name")?.Value ?? string.Empty;
-        var isBranchUser = bool.TryParse(principal.FindFirst("isBranchUser")?.Value, out var b) && b;
-
         var ssoAccessToken  = result.Properties?.GetTokenValue("access_token")
                            ?? throw new InvalidOperationException("access_token not stored by OIDC middleware.");
         var ssoRefreshToken = result.Properties?.GetTokenValue("refresh_token") ?? string.Empty;
+
+        // TPS SSO carries identity inside the access token's nested "user_info" claim
+        // (not as standard OIDC claims and not via a spec-compliant userinfo endpoint).
+        var userInfo = SsoAccessTokenParser.ExtractUserInfo(ssoAccessToken)
+            ?? throw new InvalidOperationException("user_info claim missing from SSO access token.");
+
+        var userCode = userInfo.UserCode ?? userInfo.Uid
+                    ?? throw new InvalidOperationException("user_code/uid missing from SSO user_info.");
+
+        var username     = userInfo.Username ?? userCode;
+        var firstName    = userInfo.FirstName ?? string.Empty;
+        var lastName     = userInfo.LastName  ?? string.Empty;
+        // Branch enrichment is a separate flow; a fresh login is never a branch user yet.
+        var isBranchUser = false;
 
         var accessTokenExpiry = DateTimeOffset.TryParse(
                 result.Properties?.GetTokenValue("expires_at"), out var parsed)
