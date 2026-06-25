@@ -1,3 +1,6 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 using System.Threading.RateLimiting;
 using Brdp.Authentication.Abstractions;
 using Brdp.Authentication.Configuration;
@@ -13,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
 using StackExchange.Redis;
 
 namespace Brdp.Authentication.Extensions;
@@ -229,6 +233,36 @@ public static class ServiceCollectionExtensions
                     };
                 }
 
+                // The SSO client is registered with token_endpoint_auth_method =
+                // client_secret_jwt. Instead of sending the secret as a plain form
+                // field (client_secret_post, the .NET default), authenticate with a
+                // short-lived JWT client assertion signed (HS256) with the client
+                // secret. Without this the token endpoint rejects the request.
+                if (sso.GetValue<bool>("UseClientSecretJwt"))
+                {
+                    options.Events.OnAuthorizationCodeReceived = async ctx =>
+                    {
+                        if (ctx.TokenEndpointRequest is null) return;
+
+                        // Audience defaults to the discovered token endpoint (RFC 7523 §3);
+                        // override via ClientAssertionAudience if the SSO expects the issuer.
+                        var configuredAudience = sso["ClientAssertionAudience"];
+                        var audience = !string.IsNullOrWhiteSpace(configuredAudience)
+                            ? configuredAudience
+                            : (await ctx.Options.ConfigurationManager!
+                                .GetConfigurationAsync(ctx.HttpContext.RequestAborted)
+                                .ConfigureAwait(false)).TokenEndpoint;
+
+                        var assertion = BuildClientSecretJwt(
+                            ctx.Options.ClientId!, ctx.Options.ClientSecret!, audience!);
+
+                        // Swap client_secret_post for client_secret_jwt on the token request.
+                        ctx.TokenEndpointRequest.ClientSecret        = null;
+                        ctx.TokenEndpointRequest.ClientAssertionType = ClientAssertionJwtBearer;
+                        ctx.TokenEndpointRequest.ClientAssertion     = assertion;
+                    };
+                }
+
                 // Capture the non-standard refresh_expires_in so the Redis session TTL
                 // reflects the SSO's real refresh-token lifetime instead of a guess.
                 options.Events.OnTokenResponseReceived = ctx =>
@@ -317,5 +351,35 @@ public static class ServiceCollectionExtensions
         var match = System.Text.RegularExpressions.Regex.Match(
             message, @"error_description:\s*'([^']+)'");
         return match.Success ? match.Groups[1].Value : null;
+    }
+
+    // ── client_secret_jwt assertion ───────────────────────────────────────────
+
+    private const string ClientAssertionJwtBearer =
+        "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+
+    /// <summary>
+    /// Builds a short-lived JWT client assertion (RFC 7523) signed HS256 with the
+    /// client secret, used for the <c>client_secret_jwt</c> token-endpoint auth method.
+    /// </summary>
+    private static string BuildClientSecretJwt(string clientId, string clientSecret, string audience)
+    {
+        var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(clientSecret));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var now   = DateTime.UtcNow;
+
+        var token = new JwtSecurityToken(
+            issuer:   clientId,
+            audience: audience,
+            claims:
+            [
+                new Claim(JwtRegisteredClaimNames.Sub, clientId),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
+            ],
+            notBefore:          now,
+            expires:            now.AddMinutes(5),
+            signingCredentials: creds);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 }

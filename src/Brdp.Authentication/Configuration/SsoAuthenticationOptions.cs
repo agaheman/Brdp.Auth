@@ -29,6 +29,21 @@ public sealed class SsoAuthenticationOptions
     public bool UsePkce { get; init; } = true;
 
     /// <summary>
+    /// Authenticate at the token endpoint with a signed JWT client assertion
+    /// (<c>client_secret_jwt</c>, RFC 7523) instead of sending the secret as a plain
+    /// form field. Required when the SSO client's token_endpoint_auth_method is
+    /// <c>SECRET_JWT</c>. The assertion is signed HS256 with <see cref="ClientSecret"/>.
+    /// </summary>
+    public bool UseClientSecretJwt { get; init; }
+
+    /// <summary>
+    /// Audience claim for the <c>client_secret_jwt</c> assertion. Defaults to the
+    /// discovered token endpoint (RFC 7523 §3). Set this only if the SSO expects a
+    /// different audience (e.g. its issuer identifier).
+    /// </summary>
+    public string? ClientAssertionAudience { get; init; }
+
+    /// <summary>
     /// Skip OIDC <c>at_hash</c> (access-token hash) validation of the id_token.
     /// Some SSO servers compute <c>at_hash</c> incorrectly, which makes the
     /// fully-compliant .NET validator reject an otherwise-valid login
