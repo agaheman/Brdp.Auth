@@ -23,23 +23,25 @@
       background: rgba(239,68,68,.12);
       border: 1px solid rgba(239,68,68,.35);
       border-radius: 10px;
-      padding: 16px 20px;
+      padding: 20px 24px;
       display: flex;
-      align-items: center;
-      gap: 14px;
+      align-items: flex-start;
+      gap: 16px;
     }
-    .diag-header svg { width: 28px; height: 28px; flex-shrink: 0; color: #ef4444; }
-    .diag-header h1 { font-size: 1rem; font-weight: 700; margin: 0 0 2px; }
-    .diag-header p  { margin: 0; font-size: .82rem; color: var(--muted); }
+    .diag-header svg { width: 32px; height: 32px; flex-shrink: 0; color: #ef4444; margin-top: 2px; }
+    .diag-header-body { flex: 1; min-width: 0; }
+    .diag-header h1 { font-size: 1.1rem; font-weight: 700; margin: 0 0 6px; }
+    .diag-header p  { margin: 0; font-size: .9rem; color: #e2e8f0; line-height: 1.6; word-break: break-word; }
     .error-code {
-      margin-left: auto;
+      flex-shrink: 0;
       font-family: monospace;
-      font-size: .82rem;
-      background: rgba(239,68,68,.15);
-      color: #ef4444;
-      padding: 4px 10px;
+      font-size: .85rem;
+      background: rgba(239,68,68,.2);
+      color: #fca5a5;
+      padding: 5px 12px;
       border-radius: 6px;
       white-space: nowrap;
+      border: 1px solid rgba(239,68,68,.3);
     }
 
     /* tabs */
@@ -165,7 +167,7 @@
       <circle cx="12" cy="12" r="10"/>
       <path d="M12 8v4"/><path d="M12 16h.01"/>
     </svg>
-    <div>
+    <div class="diag-header-body">
       <h1 id="errTitle">Authentication Error</h1>
       <p id="errDesc">An error occurred during the authentication flow.</p>
     </div>

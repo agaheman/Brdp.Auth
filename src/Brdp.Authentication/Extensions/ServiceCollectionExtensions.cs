@@ -190,13 +190,10 @@ public static class ServiceCollectionExtensions
                 options.SaveTokens = true;  // Required: tokens stored in cookie for /auth/SignInCallback
                 options.GetClaimsFromUserInfoEndpoint = true;
 
-                var scopes = sso.GetSection("Scopes").Get<string[]>()
-                             ?? ["openid", "profile"];
+                var scopes = sso.GetSection("Scopes").Get<string[]>() ?? [];
                 options.Scope.Clear();
                 foreach (var s in scopes.Where(s => !string.IsNullOrWhiteSpace(s)))
                     options.Scope.Add(s);
-                if (!options.Scope.Contains("openid"))
-                    options.Scope.Add("openid"); // required by OIDC spec
 
                 options.RequireHttpsMetadata = environment.IsProduction();
 

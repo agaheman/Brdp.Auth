@@ -13,7 +13,7 @@
  */
 const Dotin = (() => {
   // Same-origin gateway (the sample is served from the API host's wwwroot).
-  const API_BASE = "https://localhost:3443";
+  const API_BASE = "https://localhost:7007";
   const TOKEN_KEY = "dotin.brdpToken";
   const EXP_KEY = "dotin.expiresAt";
 

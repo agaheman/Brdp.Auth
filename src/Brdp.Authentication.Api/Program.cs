@@ -1,7 +1,10 @@
 using Brdp.Authentication.Extensions;
 
+// Allow Persian / Arabic / other multi-byte characters to render correctly
+// in the console instead of appearing as '????'.
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+
 var builder = WebApplication.CreateBuilder(args);
-Console.WriteLine(builder.Environment.EnvironmentName);
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddBrdpAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddOpenApi();

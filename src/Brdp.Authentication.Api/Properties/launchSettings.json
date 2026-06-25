@@ -6,7 +6,7 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "",
-      "applicationUrl": "https://localhost:3443",
+      "applicationUrl": "https://localhost:7007",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "ZOOKEEPER_HOST": "10.100.8.185:7081",
