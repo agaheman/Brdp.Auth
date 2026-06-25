@@ -1,3 +1,4 @@
+using Brdp.Authentication.Api.OpenApi;
 using Brdp.Authentication.Extensions;
 
 // Allow Persian / Arabic / other multi-byte characters to render correctly
@@ -7,7 +8,9 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 var builder = WebApplication.CreateBuilder(args);
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddBrdpAuthentication(builder.Configuration, builder.Environment);
-builder.Services.AddOpenApi();
+
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddBrdpSwagger();
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 var app = builder.Build();
@@ -16,7 +19,7 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
-    app.MapOpenApi();
+    app.UseBrdpSwagger();
 }
 
 app.UseHttpsRedirection();
