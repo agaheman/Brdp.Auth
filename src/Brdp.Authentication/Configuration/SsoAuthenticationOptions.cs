@@ -21,6 +21,14 @@ public sealed class SsoAuthenticationOptions
     public string   SignedOutCallbackPath  { get; init; } = "/signout-callback-oidc";
 
     /// <summary>
+    /// Use PKCE (code_challenge / code_verifier) on the Authorization-Code flow.
+    /// Default <c>true</c>. Some confidential-client OAuth servers fail when both a
+    /// <c>client_secret</c> and a <c>code_verifier</c> are sent on the token request;
+    /// set <c>false</c> to send only the client_secret.
+    /// </summary>
+    public bool UsePkce { get; init; } = true;
+
+    /// <summary>
     /// Skip OIDC <c>at_hash</c> (access-token hash) validation of the id_token.
     /// Some SSO servers compute <c>at_hash</c> incorrectly, which makes the
     /// fully-compliant .NET validator reject an otherwise-valid login

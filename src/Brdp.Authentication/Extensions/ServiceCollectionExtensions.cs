@@ -190,6 +190,10 @@ public static class ServiceCollectionExtensions
                 options.SaveTokens = true;  // Required: tokens stored in cookie for /auth/SignInCallback
                 options.GetClaimsFromUserInfoEndpoint = true;
 
+                // PKCE on by default; some confidential-client servers reject the
+                // client_secret + code_verifier combination, so it can be disabled.
+                options.UsePkce = sso.GetValue("UsePkce", true);
+
                 var scopes = sso.GetSection("Scopes").Get<string[]>() ?? [];
                 options.Scope.Clear();
                 foreach (var s in scopes.Where(s => !string.IsNullOrWhiteSpace(s)))
