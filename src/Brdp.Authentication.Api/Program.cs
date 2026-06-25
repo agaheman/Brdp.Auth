@@ -1,4 +1,3 @@
-using Brdp.Authentication.Api.OpenApi;
 using Brdp.Authentication.Extensions;
 
 // Allow Persian / Arabic / other multi-byte characters to render correctly
@@ -6,21 +5,16 @@ using Brdp.Authentication.Extensions;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 var builder = WebApplication.CreateBuilder(args);
+
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddBrdpAuthentication(builder.Configuration, builder.Environment);
-
-if (builder.Environment.IsDevelopment())
-    builder.Services.AddBrdpSwagger();
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
 // ── Middleware pipeline ───────────────────────────────────────────────────────
 if (app.Environment.IsDevelopment())
-{
     app.UseDeveloperExceptionPage();
-    app.UseBrdpSwagger();
-}
 
 app.UseHttpsRedirection();
 
@@ -29,7 +23,7 @@ app.UseHttpsRedirection();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-// 1. ASP.NET Core cookie/OIDC scheme (handles /signin-oidc callback internally).
+// 1. ASP.NET Core cookie/OIDC scheme (handles /auth/oidc-callback internally).
 app.UseAuthentication();
 
 // 2. BFF middleware: forwarded headers → CORS → rate limiter → correlation
