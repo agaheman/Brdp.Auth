@@ -244,14 +244,16 @@ public static class ServiceCollectionExtensions
                     {
                         if (ctx.TokenEndpointRequest is null) return;
 
+                        var oidcConfig = await ctx.Options.ConfigurationManager!
+                            .GetConfigurationAsync(ctx.HttpContext.RequestAborted)
+                            .ConfigureAwait(false);
+
                         // Audience defaults to the discovered token endpoint (RFC 7523 §3);
                         // override via ClientAssertionAudience if the SSO expects the issuer.
                         var configuredAudience = sso["ClientAssertionAudience"];
                         var audience = !string.IsNullOrWhiteSpace(configuredAudience)
                             ? configuredAudience
-                            : (await ctx.Options.ConfigurationManager!
-                                .GetConfigurationAsync(ctx.HttpContext.RequestAborted)
-                                .ConfigureAwait(false)).TokenEndpoint;
+                            : oidcConfig.TokenEndpoint;
 
                         var assertion = BuildClientSecretJwt(
                             ctx.Options.ClientId!, ctx.Options.ClientSecret!, audience!);
@@ -260,6 +262,16 @@ public static class ServiceCollectionExtensions
                         ctx.TokenEndpointRequest.ClientSecret        = null;
                         ctx.TokenEndpointRequest.ClientAssertionType = ClientAssertionJwtBearer;
                         ctx.TokenEndpointRequest.ClientAssertion     = assertion;
+
+                        // Diagnostic: log what we send so the audience/claims can be matched
+                        // against the SSO's expectations when it returns invalid_client.
+                        ctx.HttpContext.RequestServices
+                            .GetRequiredService<ILoggerFactory>()
+                            .CreateLogger("Brdp.Authentication.Oidc")
+                            .LogInformation(
+                                "client_secret_jwt → token_endpoint={TokenEndpoint}, issuer={Issuer}, " +
+                                "assertion aud={Audience}, iss=sub={ClientId}, alg=HS256",
+                                oidcConfig.TokenEndpoint, oidcConfig.Issuer, audience, ctx.Options.ClientId);
                     };
                 }
 
