@@ -66,7 +66,10 @@ internal sealed class TokenUpgradeService : ITokenUpgradeService
                 session.AccessTokenExpiry  = upgraded.AccessTokenExpiry;
                 session.RefreshTokenExpiry = upgraded.RefreshTokenExpiry;
                 if (!string.IsNullOrEmpty(branchCode))
-                    session.BranchCode = branchCode;
+                {
+                    session.BranchCode   = branchCode;
+                    session.IsBranchUser = true;
+                }
 
                 await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 

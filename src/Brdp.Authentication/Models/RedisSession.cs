@@ -31,7 +31,7 @@ public sealed class RedisSession
     public required string LastName { get; init; }
 
     [JsonPropertyName("isBranchUser")]
-    public bool IsBranchUser { get; init; }
+    public bool IsBranchUser { get; set; }
 
     /// <summary>Populated after branch selection. <c>null</c> for non-branch users.</summary>
     [JsonPropertyName("branchCode")]
