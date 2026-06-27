@@ -58,27 +58,27 @@ internal sealed class TokenUpgradeService : ITokenUpgradeService
                     throw new InvalidOperationException(
                         $"SSO upgrade_token failed for user '{username}'.");
 
-                // Persist rotated SSO tokens + any branch carried by the new token.
-                var branchCode = SsoAccessTokenParser.ExtractBranchCode(upgraded.AccessToken);
+                // Treat the upgraded token as the new authoritative token: recompute every
+                // session prop from the token itself rather than the (partial) response.
+                var branchCode   = SsoAccessTokenParser.ExtractBranchCode(upgraded.AccessToken);
+                var accessExpiry = SsoAccessTokenParser.ExtractExpiry(upgraded.AccessToken)
+                                   ?? upgraded.AccessTokenExpiry;
 
                 session.SsoAccessToken    = upgraded.AccessToken;
-                session.AccessTokenExpiry = upgraded.AccessTokenExpiry;
+                session.AccessTokenExpiry = accessExpiry;
 
-                // The upgrade_token response may omit refresh_token / refresh_expires_in.
-                // Do NOT downgrade the session: keep the existing refresh token and expiry
-                // unless the upgrade supplied valid replacements. Otherwise the session TTL
-                // (= RefreshTokenExpiry - now) computes to the past and the save is skipped,
-                // leaving the cached token un-updated.
+                // Branch reflects the new token's claim (authoritative).
+                session.BranchCode   = branchCode;
+                session.IsBranchUser = !string.IsNullOrEmpty(branchCode);
+
+                // Refresh token: the upgrade_token grant reuses the existing refresh token
+                // and does not return refresh_expires_in. Adopt a new refresh token only if
+                // one is returned, and keep a valid (future) refresh expiry so the session
+                // TTL (= RefreshTokenExpiry - now) stays positive and the save is not skipped.
                 if (!string.IsNullOrWhiteSpace(upgraded.RefreshToken))
                     session.SsoRefreshToken = upgraded.RefreshToken;
                 if (upgraded.RefreshTokenExpiry > DateTimeOffset.UtcNow)
                     session.RefreshTokenExpiry = upgraded.RefreshTokenExpiry;
-
-                if (!string.IsNullOrEmpty(branchCode))
-                {
-                    session.BranchCode   = branchCode;
-                    session.IsBranchUser = true;
-                }
 
                 await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
@@ -92,16 +92,16 @@ internal sealed class TokenUpgradeService : ITokenUpgradeService
                     LastName  = session.LastName,
                 };
 
-                var newBrdpToken = _brdpTokens.Issue(claims, upgraded.AccessTokenExpiry);
+                var newBrdpToken = _brdpTokens.Issue(claims, accessExpiry);
 
                 _logger.LogInformation(
-                    "Token upgrade completed for {Username} (branch {BranchCode}).",
-                    username, session.BranchCode ?? "none");
+                    "Token upgrade completed for {Username} (branch {BranchCode}, accessExpiry {Expiry:o}).",
+                    username, session.BranchCode ?? "none", accessExpiry);
 
                 return new TokenUpgradeResult
                 {
                     BrdpToken         = newBrdpToken,
-                    AccessTokenExpiry = upgraded.AccessTokenExpiry,
+                    AccessTokenExpiry = accessExpiry,
                     BranchCode        = session.BranchCode,
                 };
             },

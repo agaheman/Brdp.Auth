@@ -35,6 +35,20 @@ public static class SsoAccessTokenParser
     public static string? ExtractJti(string accessToken)
         => new JwtSecurityToken(accessToken).Id;
 
+    /// <summary>Reads the token's <c>exp</c> as an absolute expiry, or null if unset.</summary>
+    public static DateTimeOffset? ExtractExpiry(string accessToken)
+    {
+        var validTo = new JwtSecurityToken(accessToken).ValidTo;
+        return validTo == default ? null : new DateTimeOffset(validTo, TimeSpan.Zero);
+    }
+
+    /// <summary>Reads the token's <c>iat</c> (issued-at), or null if unset.</summary>
+    public static DateTimeOffset? ExtractIssuedAt(string accessToken)
+    {
+        var validFrom = new JwtSecurityToken(accessToken).ValidFrom;
+        return validFrom == default ? null : new DateTimeOffset(validFrom, TimeSpan.Zero);
+    }
+
     private static string? ReadClaim(string accessToken, string claimType)
     {
         var jwt = new JwtSecurityToken(accessToken);
