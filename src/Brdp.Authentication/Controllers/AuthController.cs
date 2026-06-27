@@ -124,36 +124,6 @@ public sealed class AuthController : ControllerBase
         if (_authOptions.SingleSessionEnabled)
             await _sessions.DeleteAsync(username, ct).ConfigureAwait(false);
 
-        var session = new RedisSession
-        {
-            ClientIp = clientIp,
-
-            // SSO token half — heavy, all SSO props.
-            Sso = new SsoTokenData
-            {
-                AccessToken        = ssoAccessToken,
-                RefreshToken       = ssoRefreshToken,
-                AccessTokenExpiry  = accessTokenExpiry,
-                RefreshTokenExpiry = refreshTokenExpiry,
-                BranchCode         = SsoAccessTokenParser.ExtractBranchCode(ssoAccessToken),
-                UserInfo           = userInfo,
-            },
-
-            // API Gateway token half — minimal claims the UI uses.
-            ApiGateway = new ApiGatewayTokenData
-            {
-                UserCode     = userCode,
-                Username     = username,
-                FirstName    = firstName,
-                LastName     = lastName,
-                BranchCode   = SsoAccessTokenParser.ExtractBranchCode(ssoAccessToken),
-                IsBranchUser = isBranchUser,
-                ExpiresAt    = accessTokenExpiry,
-            },
-        };
-
-        await _sessions.SaveAsync(session, ct).ConfigureAwait(false);
-
         var brdpToken = _brdpTokens.Issue(
             new BrdpTokenClaims
             {
@@ -164,6 +134,33 @@ public sealed class AuthController : ControllerBase
                 LastName  = lastName,
             },
             accessTokenExpiry);
+
+        var session = new RedisSession
+        {
+            ClientIp     = clientIp,
+
+            // identity at root
+            UserCode     = userCode,
+            Username     = username,
+            FirstName    = firstName,
+            LastName     = lastName,
+            BranchCode   = SsoAccessTokenParser.ExtractBranchCode(ssoAccessToken),
+            IsBranchUser = isBranchUser,
+
+            // raw SSO token pair + expiries
+            SsoToken = new SsoTokenData
+            {
+                AccessToken        = ssoAccessToken,
+                RefreshToken       = ssoRefreshToken,
+                AccessTokenExpiry  = accessTokenExpiry,
+                RefreshTokenExpiry = refreshTokenExpiry,
+            },
+
+            // the issued BrdpToken JWT the SPA holds
+            BrdpToken = brdpToken,
+        };
+
+        await _sessions.SaveAsync(session, ct).ConfigureAwait(false);
 
         // Browser SPA flow: when returnUrl points at a local page, redirect there
         // and hand the BrdpToken back in the URL fragment (#token=…), which never
@@ -246,26 +243,27 @@ public sealed class AuthController : ControllerBase
             {
                 // Guard: if another tab already refreshed, the session's AccessToken
                 // is already fresh — reuse it without hitting SSO again.
-                if (session.Sso.AccessTokenExpiry > DateTimeOffset.UtcNow + _authOptions.ProactiveRefreshThreshold)
+                if (session.SsoToken.AccessTokenExpiry > DateTimeOffset.UtcNow + _authOptions.ProactiveRefreshThreshold)
                 {
-                    return _brdpTokens.Issue(SessionToClaims(session), session.Sso.AccessTokenExpiry);
+                    return session.BrdpToken;
                 }
 
                 var ssoResponse = await _ssoTokens
-                    .RefreshAsync(session.Sso.RefreshToken, innerCt)
+                    .RefreshAsync(session.SsoToken.RefreshToken, innerCt)
                     .ConfigureAwait(false);
 
                 if (ssoResponse is null) return null;
 
-                session.Sso.AccessToken        = ssoResponse.AccessToken;
-                session.Sso.RefreshToken       = ssoResponse.RefreshToken;
-                session.Sso.AccessTokenExpiry  = ssoResponse.AccessTokenExpiry;
-                session.Sso.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
-                session.ApiGateway.ExpiresAt   = ssoResponse.AccessTokenExpiry;
+                session.SsoToken.AccessToken       = ssoResponse.AccessToken;
+                session.SsoToken.RefreshToken      = ssoResponse.RefreshToken;
+                session.SsoToken.AccessTokenExpiry = ssoResponse.AccessTokenExpiry;
+                session.SsoToken.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+
+                session.BrdpToken = _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
 
                 await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
-                return _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
+                return session.BrdpToken;
             },
             ct: ct).ConfigureAwait(false);
 
@@ -295,7 +293,7 @@ public sealed class AuthController : ControllerBase
         // 1. Sign out of Brdp first: revoke at SSO (best-effort) + delete the session.
         if (session is not null)
         {
-            await _ssoTokens.RevokeAsync(session.Sso.AccessToken, ct).ConfigureAwait(false);
+            await _ssoTokens.RevokeAsync(session.SsoToken.AccessToken, ct).ConfigureAwait(false);
             await _sessions.DeleteAsync(user.Username, ct).ConfigureAwait(false);
         }
 
@@ -325,10 +323,10 @@ public sealed class AuthController : ControllerBase
 
     private static BrdpTokenClaims SessionToClaims(RedisSession session) => new()
     {
-        Sub       = session.ApiGateway.UserCode,
-        UserCode  = session.ApiGateway.UserCode,
-        Username  = session.ApiGateway.Username,
-        FirstName = session.ApiGateway.FirstName,
-        LastName  = session.ApiGateway.LastName,
+        Sub       = session.UserCode,
+        UserCode  = session.UserCode,
+        Username  = session.Username,
+        FirstName = session.FirstName,
+        LastName  = session.LastName,
     };
 }

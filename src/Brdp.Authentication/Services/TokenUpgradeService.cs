@@ -51,62 +51,58 @@ internal sealed class TokenUpgradeService : ITokenUpgradeService
             async (session, innerCt) =>
             {
                 var upgraded = await _ssoTokens
-                    .UpgradeAsync(session.Sso.AccessToken, clientClaims, innerCt)
+                    .UpgradeAsync(session.SsoToken.AccessToken, clientClaims, innerCt)
                     .ConfigureAwait(false);
 
                 if (upgraded is null)
                     throw new InvalidOperationException(
                         $"SSO upgrade_token failed for user '{username}'.");
 
-                // Treat the upgraded token as the new authoritative token: recompute the
-                // SSO-token half from the token itself rather than the (partial) response.
+                // Treat the upgraded token as the new authoritative token: derive props
+                // from the token itself rather than the (partial) response.
                 var branchCode   = SsoAccessTokenParser.ExtractBranchCode(upgraded.AccessToken);
                 var accessExpiry = SsoAccessTokenParser.ExtractExpiry(upgraded.AccessToken)
                                    ?? upgraded.AccessTokenExpiry;
 
-                // ── SSO token half ────────────────────────────────────────────
-                session.Sso.AccessToken       = upgraded.AccessToken;
-                session.Sso.AccessTokenExpiry = accessExpiry;
-                session.Sso.BranchCode        = branchCode;
-                session.Sso.UserInfo          = SsoAccessTokenParser.ExtractUserInfo(upgraded.AccessToken)
-                                                ?? session.Sso.UserInfo;
+                // ── SsoToken (raw) ────────────────────────────────────────────
+                session.SsoToken.AccessToken       = upgraded.AccessToken;
+                session.SsoToken.AccessTokenExpiry = accessExpiry;
 
                 // The upgrade_token grant reuses the existing refresh token and omits
                 // refresh_expires_in. Adopt a new refresh token only if returned, and keep a
                 // valid (future) refresh expiry so the session TTL stays positive.
                 if (!string.IsNullOrWhiteSpace(upgraded.RefreshToken))
-                    session.Sso.RefreshToken = upgraded.RefreshToken;
+                    session.SsoToken.RefreshToken = upgraded.RefreshToken;
                 if (upgraded.RefreshTokenExpiry > DateTimeOffset.UtcNow)
-                    session.Sso.RefreshTokenExpiry = upgraded.RefreshTokenExpiry;
+                    session.SsoToken.RefreshTokenExpiry = upgraded.RefreshTokenExpiry;
 
-                // ── API Gateway token half (what the UI uses) ─────────────────
-                session.ApiGateway.BranchCode   = branchCode;
-                session.ApiGateway.IsBranchUser = !string.IsNullOrEmpty(branchCode);
-                session.ApiGateway.ExpiresAt    = accessExpiry;
+                // ── Root identity: branch reflects the new token (authoritative) ──
+                session.BranchCode   = branchCode;
+                session.IsBranchUser = !string.IsNullOrEmpty(branchCode);
+
+                // Re-issue + store the BrdpToken aligned to the new access-token expiry.
+                session.BrdpToken = _brdpTokens.Issue(
+                    new BrdpTokenClaims
+                    {
+                        Sub       = session.UserCode,
+                        UserCode  = session.UserCode,
+                        Username  = session.Username,
+                        FirstName = session.FirstName,
+                        LastName  = session.LastName,
+                    },
+                    accessExpiry);
 
                 await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
-                // Reissue BrdpToken from the API Gateway half, aligned to the new expiry.
-                var claims = new BrdpTokenClaims
-                {
-                    Sub       = session.ApiGateway.UserCode,
-                    UserCode  = session.ApiGateway.UserCode,
-                    Username  = session.ApiGateway.Username,
-                    FirstName = session.ApiGateway.FirstName,
-                    LastName  = session.ApiGateway.LastName,
-                };
-
-                var newBrdpToken = _brdpTokens.Issue(claims, accessExpiry);
-
                 _logger.LogInformation(
                     "Token upgrade completed for {Username} (branch {BranchCode}, accessExpiry {Expiry:o}).",
-                    username, session.ApiGateway.BranchCode ?? "none", accessExpiry);
+                    username, session.BranchCode ?? "none", accessExpiry);
 
                 return new TokenUpgradeResult
                 {
-                    BrdpToken         = newBrdpToken,
+                    BrdpToken         = session.BrdpToken,
                     AccessTokenExpiry = accessExpiry,
-                    BranchCode        = session.ApiGateway.BranchCode,
+                    BranchCode        = session.BranchCode,
                 };
             },
             ct: ct).ConfigureAwait(false);

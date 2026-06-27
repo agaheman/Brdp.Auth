@@ -104,11 +104,11 @@ public sealed class BrdpAuthenticationMiddleware
         }
 
         // ── Step 4: Identity cross-check ──────────────────────────────────────
-        if (!string.Equals(claims.UserCode, session.ApiGateway.UserCode, StringComparison.Ordinal))
+        if (!string.Equals(claims.UserCode, session.UserCode, StringComparison.Ordinal))
         {
             _logger.LogWarning(
                 "UserCode mismatch: token={TokenUserCode}, session={SessionUserCode}. Returning 401.",
-                claims.UserCode, session.ApiGateway.UserCode);
+                claims.UserCode, session.UserCode);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
@@ -123,8 +123,8 @@ public sealed class BrdpAuthenticationMiddleware
         // filtering on SessionId, even across OIDC browser redirects.
         using (_logger.BeginScope(new Dictionary<string, object>
         {
-            ["Username"]  = session.ApiGateway.Username,
-            ["UserCode"]  = session.ApiGateway.UserCode,
+            ["Username"]  = session.Username,
+            ["UserCode"]  = session.UserCode,
             ["SessionId"] = session.SessionId,
         }))
         {

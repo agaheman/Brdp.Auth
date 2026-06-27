@@ -89,11 +89,13 @@ Task<TokenUpgradeResult> UpgradeAsync(
 Behavior (runs under the single-flight refresh lock):
 1. Calls SSO `grant_type=upgrade_token` with the current access token's `jti` +
    serialized `client_claims` (+ scope when configured).
-2. Persists the rotated SSO tokens to the Redis session, and reads the **top-level
-   `branch_code`** claim from the upgraded token into `session.BranchCode`
-   (sets `IsBranchUser = true`). *Note: `branch_code` is a top-level claim, **not** inside
-   `user_info`.*
-3. Re-issues the BrdpToken aligned to the new access-token expiry.
+2. Treats the upgraded token as authoritative: derives the access-token expiry from the
+   token's `exp`, rotates `session.ssoToken`, and reads the **top-level `branch_code`**
+   claim into the root `session.BranchCode` (sets `IsBranchUser = true`). *Note:
+   `branch_code` is a top-level claim, **not** inside `user_info`.* The `upgrade_token`
+   grant reuses the existing refresh token and omits `refresh_expires_in`, so the prior
+   refresh token + expiry are preserved (keeping the session TTL positive).
+3. Re-issues and re-stores the BrdpToken (`session.brdpToken`) aligned to the new expiry.
 
 Idempotent and **callable repeatedly** — e.g. select a branch, then change it. Returns
 `TokenUpgradeResult { BrdpToken, AccessTokenExpiry, BranchCode }`.
@@ -124,6 +126,28 @@ Infrastructure: `RedisSessionStore`, `SsoHttpClient` (typed), `RedisKeyHelper`,
 **Convention:** services never touch `HttpContext`. They consume
 `IAuthenticatedUserContextAccessor.GetRequiredContext()`, populated once per request by
 `BrdpAuthenticationMiddleware`.
+
+### Session cache structure (`auth:session:{sha256(username)}`)
+Identity at the root, with the two tokens cleanly separated:
+
+```jsonc
+{
+  "sessionId": "…", "clientIp": "…",
+  "userCode": "99990001", "username": "99990001",
+  "firstName": "نگار", "lastName": "اصلحا",
+  "branchCode": "1", "isBranchUser": true,
+  "ssoToken": {                       // SsoTokenData — raw, server-only
+    "accessToken": "eyJ…",            //   encrypted at rest in prod
+    "refreshToken": "…",              //   encrypted at rest in prod
+    "accessTokenExpiry": "…", "refreshTokenExpiry": "…"
+  },
+  "brdpToken": "eyJ…"                 // the issued BrdpToken JWT (not encrypted)
+}
+```
+
+- **TTL** = `ssoToken.refreshTokenExpiry − now`.
+- `brdpToken` is re-issued and re-stored on every refresh/upgrade.
+- The rich SSO `user_info` is parsed at login to fill root identity but is **not** stored.
 
 ---
 

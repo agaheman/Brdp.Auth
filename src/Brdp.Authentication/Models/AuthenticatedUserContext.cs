@@ -25,14 +25,12 @@ internal sealed class AuthenticatedUserContext : IAuthenticatedUserContext
     public static AuthenticatedUserContext FromSession(RedisSession session) =>
         new()
         {
-            // Identity exposed downstream comes from the API Gateway token half
-            // (the minimal claims the UI uses); branch flags too.
-            UserCode     = session.ApiGateway.UserCode,
-            Username     = session.ApiGateway.Username,
-            FirstName    = session.ApiGateway.FirstName,
-            LastName     = session.ApiGateway.LastName,
-            BranchCode   = session.ApiGateway.BranchCode,
-            IsBranchUser = session.ApiGateway.IsBranchUser,
+            UserCode     = session.UserCode,
+            Username     = session.Username,
+            FirstName    = session.FirstName,
+            LastName     = session.LastName,
+            BranchCode   = session.BranchCode,
+            IsBranchUser = session.IsBranchUser,
             ClientIp     = session.ClientIp,
             SessionId    = session.SessionId,
         };

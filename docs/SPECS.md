@@ -4,18 +4,20 @@ Functional and behavioural contract of the library.
 
 ## 1. HTTP surface
 
-| Method | Route                  | Auth      | Description |
-|--------|------------------------|-----------|-------------|
-| GET    | `/auth/login`          | Anonymous | Initiates the OIDC Authorization-Code challenge |
-| GET    | `/auth/callback`       | Anonymous | OIDC code exchange → creates Redis session → issues BrdpToken |
-| GET    | `/auth/userinfo`       | Required  | Current user identity + session metadata |
-| POST   | `/auth/refresh-token`  | Anonymous*| Explicit BrdpToken rotation (accepts expired-but-valid token) |
-| POST   | `/auth/logout`         | Required  | Revoke SSO token + delete session + OIDC end-session |
-| GET    | `/auth/signed-out`     | Anonymous | Post-SSO-signout landing |
-| POST   | `/branch/select`       | Required  | Branch users: upgrade token with branch context |
-| GET    | `/session`             | Required  | Session introspection (no tokens exposed) |
-| DELETE | `/session`             | Required  | Self-logout without OIDC redirect |
-| GET    | `/health`              | Anonymous | Readiness probe (pings Redis) |
+| Method | Route                      | Auth      | Description |
+|--------|----------------------------|-----------|-------------|
+| GET    | `/auth/signin`             | Anonymous | Initiates the OIDC Authorization-Code challenge |
+| GET    | `/auth/oidc-callback`      | Anonymous | OIDC middleware code-exchange callback (`CallbackPath`) |
+| GET    | `/auth/signin-callback`    | Anonymous | Reads SSO tokens → creates Redis session → issues BrdpToken |
+| GET    | `/auth/userinfo`           | Required  | Current user identity + session metadata |
+| POST   | `/auth/refresh-token`      | Anonymous*| Explicit BrdpToken rotation (accepts expired-but-valid token) |
+| POST   | `/auth/signout`            | Required  | Sign out of Brdp, then returns the SSO sign-out URL |
+| GET    | `/auth/oidc-signout-callback` | Anonymous | OIDC signed-out callback (`SignedOutCallbackPath`) |
+| GET    | `/auth/signout-callback`   | Anonymous | Post-SSO-signout landing |
+| POST   | `/branch/select`           | Required  | Branch selection (a use of the Token Upgrade feature) |
+| GET    | `/session`                 | Required  | Session introspection (no tokens exposed) |
+| DELETE | `/session`                 | Required  | Self-logout without OIDC redirect |
+| GET    | `/health`                  | Anonymous | Readiness probe (pings Redis) |
 
 \* `/auth/refresh-token` is anonymous to the auth middleware because it deliberately
 accepts an expired (but signature-valid) BrdpToken; it validates the token itself.
@@ -27,21 +29,23 @@ accepts an expired (but signature-valid) BrdpToken; it validates the token itsel
 
 ### Login
 ```
-SPA → GET /auth/login → OIDC challenge → TPS SSO
-   → GET /auth/callback
+SPA → GET /auth/signin → OIDC challenge → TPS SSO
+   → GET /auth/oidc-callback (OIDC middleware code exchange)
+   → GET /auth/signin-callback
        → read SSO tokens from the OIDC cookie
+       → read identity from the access token's nested user_info claim
        → (SingleSessionEnabled) delete any prior session for the user
-       → save Redis session (TTL = refresh-token lifetime)
        → issue BrdpToken (expiry = SSO access-token expiry)
-   → 200 { token, isBranchUser, expiresAt, returnUrl }
+       → save Redis session { identity, ssoToken, brdpToken } (TTL = refresh-token lifetime)
+   → redirect returnUrl#token=…  (browser SPA) OR 200 { token, isBranchUser, expiresAt }
 ```
 
-### Branch selection (branch users only)
+### Branch selection (a use of the Token Upgrade feature)
 ```
 SPA → POST /branch/select { branchCode }
-   → [refresh lock] SSO token-exchange upgrade with branchCode
-   → update Redis (new tokens + branchCode)
-   → issue new BrdpToken aligned to new access-token expiry
+   → ITokenUpgradeService.UpgradeAsync(username, { branch_code })
+   → [refresh lock] SSO upgrade_token grant (access_token_jti + client_claims)
+   → update Redis: rotate ssoToken, set root branchCode/isBranchUser, re-issue+store brdpToken
    → 200 { token, branchCode, expiresAt }      (SPA replaces its token)
 ```
 
@@ -55,12 +59,13 @@ Request with expired / near-expiry BrdpToken
    → on failure: 401 + header X-Auth-Error: refresh_failed
 ```
 
-### Logout
+### Logout (TPS SSO has no sign-out API, only a URL)
 ```
-SPA → POST /auth/logout
-   → revoke SSO access token + delete Redis session
-   → SignOut(Cookie, OIDC) → SSO global signout
-   → SSO → GET /auth/signed-out → 200 { signedOut: true }
+SPA → POST /auth/signout
+   → revoke SSO access token + delete Redis session + clear local OIDC cookie
+   → 200 { signOutUrl }                         (Brdp is signed out first)
+SPA → window.location = signOutUrl              (SSO end-session URL)
+   → SSO clears its session → redirects to SsoAuthentication:LogoutRedirectUrl
 ```
 
 ## 3. Tokens & session
@@ -71,10 +76,31 @@ Claims: `sub`, `userCode`, `username`, `firstName`, `lastName`; `iss`/`aud` per 
 Rotation supported via `PreviousSigningKeys` (old keys still validate).
 
 ### RedisSession (`auth:session:{sha256(username)}`)
-`sessionId`, `userCode`, `username`, `firstName`, `lastName`, `isBranchUser`, `branchCode?`,
-`clientIp`, `ssoAccessToken`, `ssoRefreshToken`, `accessTokenExpiry`, `refreshTokenExpiry`.
-TTL = `refreshTokenExpiry − now`. `ssoAccessToken`/`ssoRefreshToken` encrypted at rest when
-`EncryptTokensAtRest=true`.
+Two clearly separated tokens plus identity at the root:
+
+```jsonc
+{
+  "sessionId": "…",
+  "clientIp": "10.20.153.42",
+  "userCode": "99990001",          // ── identity (root)
+  "username": "99990001",
+  "firstName": "نگار",
+  "lastName": "اصلحا",
+  "branchCode": "1",
+  "isBranchUser": true,
+  "ssoToken": {                    // ── SsoToken: raw SSO pair + expiries (server-only)
+    "accessToken": "eyJ…",         //    encrypted at rest when EncryptTokensAtRest=true
+    "refreshToken": "…",           //    encrypted at rest when EncryptTokensAtRest=true
+    "accessTokenExpiry": "…",
+    "refreshTokenExpiry": "…"
+  },
+  "brdpToken": "eyJ…"             // ── BrdpToken: the issued JWT the SPA holds (not encrypted)
+}
+```
+
+TTL = `ssoToken.refreshTokenExpiry − now`. The `brdpToken` is re-issued and re-stored on
+every refresh/upgrade. The rich SSO `user_info` is parsed at login to fill the root identity
+but is **not** stored.
 
 ## 4. Invariants
 
@@ -106,7 +132,10 @@ TTL = `refreshTokenExpiry − now`. `ssoAccessToken`/`ssoRefreshToken` encrypted
 
 `SsoAuthentication` section: `ClientId`, `ClientSecret`, `Authority`, `MetadataAddress`
 (required), plus `ResponseType`, `Scopes`, `CallbackPath`, `SignedOutCallbackPath`,
-`UpgradeTokenEndpoint`.
+`TokenEndpointPath` (`/oauth/token`), `RevocationEndpointPath` (`/revoke`),
+`EndSessionEndpointPath` (`/oauth/endsession`), `LogoutRedirectUrl`, `HttpTimeoutSeconds`
+(`60`), and TPS-compatibility switches: `UsePkce`, `UseClientSecretJwt`,
+`ClientAssertionAudience`, `SkipAtHashValidation`, `GetClaimsFromUserInfoEndpoint`.
 
 ## 6. Logging / correlation
 

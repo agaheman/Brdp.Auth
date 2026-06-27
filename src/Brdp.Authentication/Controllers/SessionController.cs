@@ -34,27 +34,21 @@ public sealed class SessionController : ControllerBase
         if (session is null)
             return NotFound(new { error = "session_not_found" });
 
-        // Tokens themselves are never exposed — only metadata from each half.
+        // Tokens themselves are never exposed — only identity + SSO token expiries.
         return Ok(new
         {
             session.SessionId,
             session.ClientIp,
-            apiGateway = new
+            session.UserCode,
+            session.Username,
+            session.FirstName,
+            session.LastName,
+            session.BranchCode,
+            session.IsBranchUser,
+            ssoToken = new
             {
-                session.ApiGateway.UserCode,
-                session.ApiGateway.Username,
-                session.ApiGateway.FirstName,
-                session.ApiGateway.LastName,
-                session.ApiGateway.BranchCode,
-                session.ApiGateway.IsBranchUser,
-                session.ApiGateway.ExpiresAt,
-            },
-            sso = new
-            {
-                session.Sso.BranchCode,
-                session.Sso.AccessTokenExpiry,
-                session.Sso.RefreshTokenExpiry,
-                session.Sso.UserInfo,
+                session.SsoToken.AccessTokenExpiry,
+                session.SsoToken.RefreshTokenExpiry,
             },
         });
     }

@@ -25,7 +25,8 @@ src/
     Extensions/     AddBrdpAuthentication (DI) + UseBrdpAuthentication (pipeline)
     Infrastructure/ RedisSessionStore, SsoHttpClient, RedisKeyHelper
     Middleware/     Correlation → TokenRefresh → BrdpAuthentication
-    Models/         RedisSession, BrdpTokenClaims, SsoTokenResponse, …
+    Models/         RedisSession, SsoTokenData, BrdpTokenClaims, SsoTokenResponse,
+                    SsoUserInfo, TokenUpgradeResult, …
     Security/       DataProtection / NoOp token encryption
     Services/       SessionService, BrdpTokenService, BranchService, SsoTokenService
   Brdp.Authentication.Api/        ← host (Program.cs, appsettings.json)
@@ -62,6 +63,15 @@ It must be called **after** `UseAuthentication()` (the OIDC/Cookie handlers) and
   `/auth/refresh-token`, `/auth/oidc-callback`, `/auth/oidc-signout-callback`, `/health`.
 - **Redis keys** are built only via `RedisKeyHelper` (`auth:session:{sha256(username)}`,
   `auth:lock:{sha256(username)}`).
+- **Session cache shape** (`RedisSession`): identity at the root (`userCode`, `username`,
+  `firstName`, `lastName`, `branchCode`, `isBranchUser`), plus two separated tokens —
+  `ssoToken` (`SsoTokenData`: raw access/refresh + expiries, encrypted at rest) and
+  `brdpToken` (the issued BrdpToken JWT the SPA holds). TTL = `ssoToken.refreshTokenExpiry`.
+  The rich SSO `user_info` is parsed at login to fill root identity but is **not** stored.
+- **Token Upgrade** is a public, reusable feature (`ITokenUpgradeService.UpgradeAsync`):
+  rotates the SSO token via the SSO `upgrade_token` grant, updates the cached session, and
+  re-issues the BrdpToken. Branch selection (`IBranchService` / `POST /branch/select`) is one
+  use of it (claims `{ branch_code }`). Runs inside `ExecuteWithRefreshLockAsync`.
 - **Token rotation is single-flight per user** via `ExecuteWithRefreshLockAsync` — any
   code that rotates SSO tokens (refresh, branch upgrade) must run inside it.
 - **Logging:** every request runs inside a correlation scope (`CorrelationId`, `TraceId`,

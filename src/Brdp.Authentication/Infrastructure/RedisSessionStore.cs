@@ -58,15 +58,15 @@ internal sealed class RedisSessionStore
 
     public async Task SaveAsync(RedisSession session, CancellationToken ct)
     {
-        var username = session.ApiGateway.Username;
+        var username = session.Username;
         var key      = RedisKeyHelper.SessionKey(username);
         var payload  = Serialize(EncryptIfRequired(session));
-        var ttl      = session.Sso.RefreshTokenExpiry - DateTimeOffset.UtcNow;
+        var ttl      = session.SsoToken.RefreshTokenExpiry - DateTimeOffset.UtcNow;
 
         if (ttl <= TimeSpan.Zero)
         {
             _logger.LogWarning(
-                "Skipping session save for {Username} — Sso.RefreshTokenExpiry is in the past.", username);
+                "Skipping session save for {Username} — SsoToken.RefreshTokenExpiry is in the past.", username);
             return;
         }
 
@@ -216,16 +216,16 @@ internal sealed class RedisSessionStore
     private RedisSession EncryptIfRequired(RedisSession session)
     {
         if (!_options.EncryptTokensAtRest) return session;
-        session.Sso.AccessToken  = _encryption.Encrypt(session.Sso.AccessToken);
-        session.Sso.RefreshToken = _encryption.Encrypt(session.Sso.RefreshToken);
+        session.SsoToken.AccessToken  = _encryption.Encrypt(session.SsoToken.AccessToken);
+        session.SsoToken.RefreshToken = _encryption.Encrypt(session.SsoToken.RefreshToken);
         return session;
     }
 
     private RedisSession DecryptIfRequired(RedisSession session)
     {
         if (!_options.EncryptTokensAtRest) return session;
-        session.Sso.AccessToken  = _encryption.Decrypt(session.Sso.AccessToken);
-        session.Sso.RefreshToken = _encryption.Decrypt(session.Sso.RefreshToken);
+        session.SsoToken.AccessToken  = _encryption.Decrypt(session.SsoToken.AccessToken);
+        session.SsoToken.RefreshToken = _encryption.Decrypt(session.SsoToken.RefreshToken);
         return session;
     }
 }

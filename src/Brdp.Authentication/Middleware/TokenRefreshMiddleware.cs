@@ -124,17 +124,17 @@ public sealed class TokenRefreshMiddleware
             {
                 // Guard: another caller may have already refreshed — check if
                 // the current session tokens are newer than what we started with.
-                if (session.Sso.AccessTokenExpiry > DateTimeOffset.UtcNow + _options.ProactiveRefreshThreshold)
+                if (session.SsoToken.AccessTokenExpiry > DateTimeOffset.UtcNow + _options.ProactiveRefreshThreshold)
                 {
                     _logger.LogDebug(
                         "Session for {Username} was already refreshed by a concurrent caller. " +
-                        "Issuing BrdpToken from current session.", claims.Username);
+                        "Returning the stored BrdpToken.", claims.Username);
 
-                    return _brdpTokens.Issue(SessionToClaims(session), session.Sso.AccessTokenExpiry);
+                    return session.BrdpToken;
                 }
 
                 var ssoResponse = await ssoTokens
-                    .RefreshAsync(session.Sso.RefreshToken, innerCt)
+                    .RefreshAsync(session.SsoToken.RefreshToken, innerCt)
                     .ConfigureAwait(false);
 
                 if (ssoResponse is null)
@@ -143,15 +143,16 @@ public sealed class TokenRefreshMiddleware
                     return null;
                 }
 
-                session.Sso.AccessToken      = ssoResponse.AccessToken;
-                session.Sso.RefreshToken     = ssoResponse.RefreshToken;
-                session.Sso.AccessTokenExpiry  = ssoResponse.AccessTokenExpiry;
-                session.Sso.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
-                session.ApiGateway.ExpiresAt   = ssoResponse.AccessTokenExpiry;
+                session.SsoToken.AccessToken       = ssoResponse.AccessToken;
+                session.SsoToken.RefreshToken      = ssoResponse.RefreshToken;
+                session.SsoToken.AccessTokenExpiry = ssoResponse.AccessTokenExpiry;
+                session.SsoToken.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+
+                session.BrdpToken = _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
 
                 await sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
-                return _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
+                return session.BrdpToken;
             },
             ct: ct).ConfigureAwait(false);
     }
@@ -179,11 +180,11 @@ public sealed class TokenRefreshMiddleware
 
     private static BrdpTokenClaims SessionToClaims(RedisSession session) => new()
     {
-        Sub       = session.ApiGateway.UserCode,
-        UserCode  = session.ApiGateway.UserCode,
-        Username  = session.ApiGateway.Username,
-        FirstName = session.ApiGateway.FirstName,
-        LastName  = session.ApiGateway.LastName,
+        Sub       = session.UserCode,
+        UserCode  = session.UserCode,
+        Username  = session.Username,
+        FirstName = session.FirstName,
+        LastName  = session.LastName,
     };
 
     private static string? ExtractBearerToken(HttpRequest request)

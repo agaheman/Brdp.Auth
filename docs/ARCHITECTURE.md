@@ -77,9 +77,17 @@ controller routes.
 | `BrdpTokenService` | Issue/validate HS256 BrdpTokens; supports key rotation via `PreviousSigningKeys` |
 | `SessionService` → `RedisSessionStore` | Session CRUD + distributed refresh lock (SET NX PX + Lua release) |
 | `SsoTokenService` → `SsoHttpClient` | Typed HTTP client for SSO refresh / upgrade / revoke |
-| `BranchService` | Branch-selection token upgrade (runs inside the refresh lock) |
+| `TokenUpgradeService` | Reusable Token Upgrade feature (SSO `upgrade_token` → update session → re-issue BrdpToken) |
+| `BranchService` | Branch selection — a thin use of `TokenUpgradeService` (`{ branch_code }`) |
 | `ITokenEncryptionService` | `DataProtection` (prod) or `NoOp` (dev) encryption of SSO tokens at rest |
 | `Correlation`/`TokenRefresh`/`BrdpAuthentication` middleware | Cross-cutting request handling |
+
+### Session cache layout (`auth:session:{sha256(username)}`)
+Identity at the root + two separated tokens: `ssoToken` (`SsoTokenData` — raw access/refresh
++ expiries, encrypted at rest) and `brdpToken` (the issued BrdpToken JWT the SPA holds).
+TTL = `ssoToken.refreshTokenExpiry − now`. The SSO `user_info` is parsed at login to fill the
+root identity (`userCode`, `username`, `firstName`, `lastName`, `branchCode`, `isBranchUser`)
+but is not itself stored.
 
 ## 5. Concurrency: the refresh lock
 
