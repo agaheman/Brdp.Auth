@@ -5,33 +5,23 @@ using Microsoft.Extensions.Logging;
 namespace Brdp.Authentication.Services;
 
 /// <summary>
-/// Orchestrates the complete branch-selection upgrade flow:
+/// Branch selection — a thin <b>use</b> of the reusable Token Upgrade feature
+/// (<see cref="ITokenUpgradeService"/>). It builds the branch client-claims and
+/// delegates the SSO upgrade, session update, and BrdpToken reissue to that feature.
 ///
-///   1. Load current Redis session (must exist — user is already logged in).
-///   2. Call SSO <c>upgradeToken</c> with the current access token + selected branch code.
-///   3. Update Redis session: new SsoTokens, branchCode, updated expiry.
-///   4. Issue a new BrdpToken aligned to the new SsoAccessToken expiry.
-///   5. Return the new BrdpToken to the caller — the SPA must replace the old one.
-///
-/// The flow is idempotent: selecting the same branch again simply re-upgrades the token.
+/// Repeatable: selecting a different branch simply upgrades the token again.
 /// </summary>
 internal sealed class BranchService : IBranchService
 {
-    private readonly ISessionService            _sessions;
-    private readonly ISsoTokenService           _ssoTokens;
-    private readonly IBrdpTokenService          _brdpTokens;
-    private readonly ILogger<BranchService>     _logger;
+    private readonly ITokenUpgradeService    _tokenUpgrade;
+    private readonly ILogger<BranchService>  _logger;
 
     public BranchService(
-        ISessionService         sessions,
-        ISsoTokenService        ssoTokens,
-        IBrdpTokenService       brdpTokens,
+        ITokenUpgradeService    tokenUpgrade,
         ILogger<BranchService>  logger)
     {
-        _sessions   = sessions;
-        _ssoTokens  = ssoTokens;
-        _brdpTokens = brdpTokens;
-        _logger     = logger;
+        _tokenUpgrade = tokenUpgrade;
+        _logger       = logger;
     }
 
     public async Task<BranchSelectionResult> SelectBranchAsync(
@@ -42,63 +32,19 @@ internal sealed class BranchService : IBranchService
         ArgumentException.ThrowIfNullOrWhiteSpace(username);
         ArgumentException.ThrowIfNullOrWhiteSpace(branchCode);
 
-        _logger.LogInformation(
-            "Branch selection started for {Username} → branch {BranchCode}", username, branchCode);
+        _logger.LogInformation("Branch selection for {Username} → branch {BranchCode}", username, branchCode);
 
-        // Run under the same distributed lock as token refresh: branch upgrade rotates
-        // the (single-use) SSO tokens, so it must not race a concurrent refresh on the
-        // same session. The lock loads the current session and hands it to us.
-        var result = await _sessions.ExecuteWithRefreshLockAsync<BranchSelectionResult>(
+        // Branch is just a set of client claims fed to the Token Upgrade feature.
+        var upgrade = await _tokenUpgrade.UpgradeAsync(
             username,
-            async (session, innerCt) =>
-            {
-                // ── Step 1: Call SSO upgradeToken ────────────────────────────
-                var upgraded = await _ssoTokens
-                    .UpgradeAsync(session.SsoAccessToken, branchCode, innerCt)
-                    .ConfigureAwait(false);
+            new Dictionary<string, object?> { ["branch_code"] = branchCode },
+            ct).ConfigureAwait(false);
 
-                if (upgraded is null)
-                    throw new InvalidOperationException(
-                        $"SSO upgrade token call failed for user '{username}' and branch '{branchCode}'. " +
-                        "The branch may not be accessible to this user.");
-
-                // ── Step 2: Update Redis session ─────────────────────────────
-                session.BranchCode         = branchCode;
-                session.SsoAccessToken     = upgraded.AccessToken;
-                session.SsoRefreshToken    = upgraded.RefreshToken;
-                session.AccessTokenExpiry  = upgraded.AccessTokenExpiry;
-                session.RefreshTokenExpiry = upgraded.RefreshTokenExpiry;
-
-                await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
-
-                // ── Step 3: Issue new BrdpToken ──────────────────────────────
-                // Expiry(BrdpToken) == Expiry(SsoAccessToken) — alignment invariant.
-                var claims = new BrdpTokenClaims
-                {
-                    Sub       = session.UserCode,
-                    UserCode  = session.UserCode,
-                    Username  = session.Username,
-                    FirstName = session.FirstName,
-                    LastName  = session.LastName,
-                };
-
-                var newBrdpToken = _brdpTokens.Issue(claims, upgraded.AccessTokenExpiry);
-
-                _logger.LogInformation(
-                    "Branch selection completed for {Username} → branch {BranchCode}, new token issued.",
-                    username, branchCode);
-
-                return new BranchSelectionResult
-                {
-                    BrdpToken         = newBrdpToken,
-                    BranchCode        = branchCode,
-                    AccessTokenExpiry = upgraded.AccessTokenExpiry,
-                };
-            },
-            ct: ct).ConfigureAwait(false);
-
-        return result
-            ?? throw new InvalidOperationException(
-                $"No active session found for user '{username}'. Cannot perform branch selection.");
+        return new BranchSelectionResult
+        {
+            BrdpToken         = upgrade.BrdpToken,
+            BranchCode        = upgrade.BranchCode ?? branchCode,
+            AccessTokenExpiry = upgrade.AccessTokenExpiry,
+        };
     }
 }

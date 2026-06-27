@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Brdp.Authentication/Brdp.Authentication.csproj" />
+  <Project Path="src/Brdp.Authentication.Api/Brdp.Authentication.Api.csproj" />
+</Solution>

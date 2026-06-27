@@ -13,7 +13,7 @@
  */
 const Dotin = (() => {
   // Same-origin gateway (the sample is served from the API host's wwwroot).
-  const API_BASE = "";
+  const API_BASE = "https://localhost:7007";
   const TOKEN_KEY = "dotin.brdpToken";
   const EXP_KEY = "dotin.expiresAt";
 
@@ -30,12 +30,11 @@ const Dotin = (() => {
     localStorage.removeItem(EXP_KEY);
   };
 
-  // Start the OIDC login flow. The gateway redirects back to /callback.html
+  // Start the OIDC login flow. The gateway redirects back to /signin-complete.html
   // with the issued BrdpToken in the URL fragment.
   const login = () => {
-    const returnUrl = "/callback.html";
-    window.location.href =
-      `${API_BASE}/auth/login?returnUrl=${encodeURIComponent(returnUrl)}`;
+    const returnUrl = "/signin-complete.html";
+    window.location.href = `${API_BASE}/auth/signin?returnUrl=${encodeURIComponent(returnUrl)}`;
   };
 
   // Fetch wrapper that injects the Bearer token and absorbs token rotation.
@@ -78,8 +77,26 @@ const Dotin = (() => {
     return (username || "?").slice(0, 2).toUpperCase();
   };
 
+  // Use the Token Upgrade feature to select a branch: POST /branch/select →
+  // gateway upgrades the SSO token, updates the session, returns a new BrdpToken
+  // (with the branch claim). We replace the stored token with it.
+  const selectBranch = async (branchCode) => {
+    const res = await authFetch("/branch/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branchCode }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Branch upgrade failed (${res.status}).`);
+    }
+    const data = await res.json();
+    setSession(data.token, data.expiresAt);
+    return data; // { token, branchCode, expiresAt }
+  };
+
   return {
     API_BASE, login, authFetch, getToken, getExpiry,
-    setSession, clearSession, captureTokenFromFragment, initials,
+    setSession, clearSession, captureTokenFromFragment, initials, selectBranch,
   };
 })();

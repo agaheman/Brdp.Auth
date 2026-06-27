@@ -5,19 +5,29 @@ namespace Brdp.Authentication.Models;
 /// <summary>
 /// The payload stored in Redis under key <c>auth:session:{sha256(username)}</c>.
 ///
-/// TTL rule: Redis TTL = RefreshTokenExpiry (not AccessTokenExpiry).
-/// An expired AccessToken does NOT mean an expired session — the refresh flow
-/// can restore it as long as RefreshToken is still valid.
+/// Layout:
+///   • Identity at the root (userCode / username / names / branch) — what the UI sees.
+///   • <see cref="SsoToken"/> — the raw SSO token pair + expiries (server-only).
+///   • <see cref="BrdpToken"/> — the issued BrdpToken JWT the SPA holds.
 ///
-/// In production (<c>EncryptTokensAtRest = true</c>), <see cref="SsoAccessToken"/>,
-/// <see cref="SsoRefreshToken"/>, and any persisted BrdpToken are encrypted before write
-/// and decrypted after read by <see cref="Infrastructure.RedisSessionStore"/>.
+/// TTL rule: Redis TTL = <c>SsoToken.RefreshTokenExpiry</c> (not the access-token expiry).
+/// An expired access token does NOT mean an expired session — the refresh/upgrade flow
+/// can restore it while the refresh token is still valid.
+///
+/// In production (<c>EncryptTokensAtRest = true</c>), <see cref="SsoTokenData.AccessToken"/>
+/// and <see cref="SsoTokenData.RefreshToken"/> are encrypted before write and decrypted
+/// after read by <see cref="Infrastructure.RedisSessionStore"/>. The BrdpToken is not
+/// encrypted (short-lived; the SPA already holds it).
 /// </summary>
 public sealed class RedisSession
 {
     [JsonPropertyName("sessionId")]
     public string SessionId { get; init; } = Guid.NewGuid().ToString("N");
 
+    [JsonPropertyName("clientIp")]
+    public required string ClientIp { get; init; }
+
+    // ── Identity (root) — the minimal claims the UI/BrdpToken use ──────────────
     [JsonPropertyName("userCode")]
     public required string UserCode { get; init; }
 
@@ -25,32 +35,24 @@ public sealed class RedisSession
     public required string Username { get; init; }
 
     [JsonPropertyName("firstName")]
-    public required string FirstName { get; init; }
+    public string FirstName { get; set; } = string.Empty;
 
     [JsonPropertyName("lastName")]
-    public required string LastName { get; init; }
+    public string LastName { get; set; } = string.Empty;
 
-    [JsonPropertyName("isBranchUser")]
-    public bool IsBranchUser { get; init; }
-
-    /// <summary>Populated after branch selection. <c>null</c> for non-branch users.</summary>
+    /// <summary>Branch selected via a token upgrade; <c>null</c> before selection.</summary>
     [JsonPropertyName("branchCode")]
     public string? BranchCode { get; set; }
 
-    [JsonPropertyName("clientIp")]
-    public required string ClientIp { get; init; }
+    [JsonPropertyName("isBranchUser")]
+    public bool IsBranchUser { get; set; }
 
-    /// <summary>Stored encrypted in production.</summary>
-    [JsonPropertyName("ssoAccessToken")]
-    public required string SsoAccessToken { get; set; }
+    // ── Tokens ────────────────────────────────────────────────────────────────
+    /// <summary>Raw SSO token pair + expiries (server-only, encrypted at rest).</summary>
+    [JsonPropertyName("ssoToken")]
+    public required SsoTokenData SsoToken { get; set; }
 
-    /// <summary>Stored encrypted in production.</summary>
-    [JsonPropertyName("ssoRefreshToken")]
-    public required string SsoRefreshToken { get; set; }
-
-    [JsonPropertyName("accessTokenExpiry")]
-    public required DateTimeOffset AccessTokenExpiry { get; set; }
-
-    [JsonPropertyName("refreshTokenExpiry")]
-    public required DateTimeOffset RefreshTokenExpiry { get; set; }
+    /// <summary>The issued BrdpToken (HS256 JWT) the SPA holds. Re-issued on refresh/upgrade.</summary>
+    [JsonPropertyName("brdpToken")]
+    public string BrdpToken { get; set; } = string.Empty;
 }

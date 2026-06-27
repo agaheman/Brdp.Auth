@@ -58,14 +58,15 @@ internal sealed class RedisSessionStore
 
     public async Task SaveAsync(RedisSession session, CancellationToken ct)
     {
-        var key     = RedisKeyHelper.SessionKey(session.Username);
-        var payload = Serialize(EncryptIfRequired(session));
-        var ttl     = session.RefreshTokenExpiry - DateTimeOffset.UtcNow;
+        var username = session.Username;
+        var key      = RedisKeyHelper.SessionKey(username);
+        var payload  = Serialize(EncryptIfRequired(session));
+        var ttl      = session.SsoToken.RefreshTokenExpiry - DateTimeOffset.UtcNow;
 
         if (ttl <= TimeSpan.Zero)
         {
             _logger.LogWarning(
-                "Skipping session save for {Username} — RefreshTokenExpiry is in the past.", session.Username);
+                "Skipping session save for {Username} — SsoToken.RefreshTokenExpiry is in the past.", username);
             return;
         }
 
@@ -74,7 +75,7 @@ internal sealed class RedisSessionStore
                     .ConfigureAwait(false);
 
         _logger.LogDebug(
-            "Session saved for {Username} (ttl={Ttl:g})", session.Username, ttl);
+            "Session saved for {Username} (ttl={Ttl:g})", username, ttl);
     }
 
     public Task UpdateAsync(RedisSession session, CancellationToken ct) =>
@@ -215,16 +216,16 @@ internal sealed class RedisSessionStore
     private RedisSession EncryptIfRequired(RedisSession session)
     {
         if (!_options.EncryptTokensAtRest) return session;
-        session.SsoAccessToken  = _encryption.Encrypt(session.SsoAccessToken);
-        session.SsoRefreshToken = _encryption.Encrypt(session.SsoRefreshToken);
+        session.SsoToken.AccessToken  = _encryption.Encrypt(session.SsoToken.AccessToken);
+        session.SsoToken.RefreshToken = _encryption.Encrypt(session.SsoToken.RefreshToken);
         return session;
     }
 
     private RedisSession DecryptIfRequired(RedisSession session)
     {
         if (!_options.EncryptTokensAtRest) return session;
-        session.SsoAccessToken  = _encryption.Decrypt(session.SsoAccessToken);
-        session.SsoRefreshToken = _encryption.Decrypt(session.SsoRefreshToken);
+        session.SsoToken.AccessToken  = _encryption.Decrypt(session.SsoToken.AccessToken);
+        session.SsoToken.RefreshToken = _encryption.Decrypt(session.SsoToken.RefreshToken);
         return session;
     }
 }

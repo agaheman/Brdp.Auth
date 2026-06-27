@@ -1,14 +1,15 @@
 using Brdp.Authentication.Abstractions;
 using Brdp.Authentication.Configuration;
+using Brdp.Authentication.Infrastructure;
 using Brdp.Authentication.Models;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using AuthenticationOptions = Brdp.Authentication.Configuration.AuthenticationOptions;
 
 // Disambiguate from Microsoft.AspNetCore.Authentication.AuthenticationOptions,
 // which the OIDC handler brings into scope via the `using` above.
-using AuthenticationOptions = Brdp.Authentication.Configuration.AuthenticationOptions;
-
 namespace Brdp.Authentication.Controllers;
 
 /// <summary>
@@ -16,12 +17,12 @@ namespace Brdp.Authentication.Controllers;
 ///
 /// Action names follow the OIDC/OAuth2 specification terminology and ASP.NET Core Identity conventions:
 ///
-///   GET  /auth/login              Login           — initiates OIDC Authorization-Code challenge
-///   GET  /auth/callback           Callback        — OIDC code exchange; creates session + issues BrdpToken
+///   GET  /auth/SignIn             SignIn          — initiates OIDC Authorization-Code challenge
+///   GET  /auth/SignInCallback     SignInCallback  — OIDC code exchange; creates session + issues BrdpToken
 ///   GET  /auth/userinfo           UserInfo        — mirrors the OIDC userinfo endpoint semantics
 ///   POST /auth/refresh-token      RefreshToken    — explicit token rotation (RFC 6749 §6)
-///   POST /auth/logout             Logout          — revoke + delete session + trigger OIDC end_session
-///   GET  /auth/signed-out         SignedOut       — post-SSO-signout landing (OIDC post_logout_redirect_uri)
+///   POST /auth/SignOut            SignOut         — revoke + delete session + trigger OIDC end_session
+///   GET  /auth/SignOutCallback    SignOutCallback — post-SSO-signout landing (OIDC post_logout_redirect_uri)
 /// </summary>
 [ApiController]
 [Route("auth")]
@@ -32,19 +33,22 @@ public sealed class AuthController : ControllerBase
     private readonly ISsoTokenService                  _ssoTokens;
     private readonly IAuthenticatedUserContextAccessor _accessor;
     private readonly AuthenticationOptions             _authOptions;
+    private readonly SsoAuthenticationOptions          _ssoOptions;
 
     public AuthController(
-        ISessionService                   sessions,
-        IBrdpTokenService                 brdpTokens,
-        ISsoTokenService                  ssoTokens,
-        IAuthenticatedUserContextAccessor accessor,
-        IOptions<AuthenticationOptions>   authOptions)
+        ISessionService                    sessions,
+        IBrdpTokenService                  brdpTokens,
+        ISsoTokenService                   ssoTokens,
+        IAuthenticatedUserContextAccessor  accessor,
+        IOptions<AuthenticationOptions>    authOptions,
+        IOptions<SsoAuthenticationOptions> ssoOptions)
     {
         _sessions    = sessions;
         _brdpTokens  = brdpTokens;
         _ssoTokens   = ssoTokens;
         _accessor    = accessor;
         _authOptions = authOptions.Value;
+        _ssoOptions  = ssoOptions.Value;
     }
 
     // ── Login ─────────────────────────────────────────────────────────────────
@@ -52,14 +56,15 @@ public sealed class AuthController : ControllerBase
     /// <summary>
     /// Initiates the OIDC Authorization-Code flow.
     /// Challenges the OIDC scheme, which redirects the browser to the TPS SSO
-    /// authorization endpoint. After authentication SSO redirects to <c>/auth/callback</c>.
+    /// authorization endpoint. After authentication SSO redirects to <c>/auth/SignInCallback</c>.
     /// </summary>
-    [HttpGet("login")]
-    public IActionResult Login([FromQuery] string returnUrl = "/")
+    [AllowAnonymous]
+    [HttpGet("signin")]
+    public IActionResult SignIn([FromQuery] string returnUrl = "/")
         => Challenge(
             new AuthenticationProperties
             {
-                RedirectUri = $"/auth/callback?returnUrl={Uri.EscapeDataString(returnUrl)}"
+                RedirectUri = $"/auth/signin-callback?returnUrl={Uri.EscapeDataString(returnUrl)}"
             },
             SsoAuthenticationDefaults.OidcScheme);
 
@@ -71,8 +76,9 @@ public sealed class AuthController : ControllerBase
     /// them into the cookie session. This action reads those tokens, creates the
     /// Redis session, and issues a BrdpToken for the SPA.
     /// </summary>
-    [HttpGet("callback")]
-    public async Task<IActionResult> Callback(
+    [AllowAnonymous]
+    [HttpGet("signin-callback")]
+    public async Task<IActionResult> SignInCallback(
         [FromQuery] string returnUrl = "/",
         CancellationToken ct = default)
     {
@@ -80,23 +86,23 @@ public sealed class AuthController : ControllerBase
         if (!result.Succeeded)
             return Unauthorized(new { error = "oidc_authentication_failed" });
 
-        var principal = result.Principal!;
-
-        var userCode = principal.FindFirst("userCode")?.Value
-                    ?? principal.FindFirst("sub")?.Value
-                    ?? throw new InvalidOperationException("userCode/sub claim missing from SSO token.");
-
-        var username = principal.FindFirst("preferred_username")?.Value
-                    ?? principal.Identity?.Name
-                    ?? throw new InvalidOperationException("preferred_username claim missing from SSO token.");
-
-        var firstName    = principal.FindFirst("given_name")?.Value  ?? string.Empty;
-        var lastName     = principal.FindFirst("family_name")?.Value ?? string.Empty;
-        var isBranchUser = bool.TryParse(principal.FindFirst("isBranchUser")?.Value, out var b) && b;
-
         var ssoAccessToken  = result.Properties?.GetTokenValue("access_token")
                            ?? throw new InvalidOperationException("access_token not stored by OIDC middleware.");
         var ssoRefreshToken = result.Properties?.GetTokenValue("refresh_token") ?? string.Empty;
+
+        // TPS SSO carries identity inside the access token's nested "user_info" claim
+        // (not as standard OIDC claims and not via a spec-compliant userinfo endpoint).
+        var userInfo = SsoAccessTokenParser.ExtractUserInfo(ssoAccessToken)
+            ?? throw new InvalidOperationException("user_info claim missing from SSO access token.");
+
+        var userCode = userInfo.UserCode ?? userInfo.Uid
+                    ?? throw new InvalidOperationException("user_code/uid missing from SSO user_info.");
+
+        var username     = userInfo.Username ?? userCode;
+        var firstName    = userInfo.FirstName ?? string.Empty;
+        var lastName     = userInfo.LastName  ?? string.Empty;
+        // Branch enrichment is a separate flow; a fresh login is never a branch user yet.
+        var isBranchUser = false;
 
         var accessTokenExpiry = DateTimeOffset.TryParse(
                 result.Properties?.GetTokenValue("expires_at"), out var parsed)
@@ -118,22 +124,6 @@ public sealed class AuthController : ControllerBase
         if (_authOptions.SingleSessionEnabled)
             await _sessions.DeleteAsync(username, ct).ConfigureAwait(false);
 
-        var session = new RedisSession
-        {
-            UserCode           = userCode,
-            Username           = username,
-            FirstName          = firstName,
-            LastName           = lastName,
-            IsBranchUser       = isBranchUser,
-            ClientIp           = clientIp,
-            SsoAccessToken     = ssoAccessToken,
-            SsoRefreshToken    = ssoRefreshToken,
-            AccessTokenExpiry  = accessTokenExpiry,
-            RefreshTokenExpiry = refreshTokenExpiry,
-        };
-
-        await _sessions.SaveAsync(session, ct).ConfigureAwait(false);
-
         var brdpToken = _brdpTokens.Issue(
             new BrdpTokenClaims
             {
@@ -144,6 +134,33 @@ public sealed class AuthController : ControllerBase
                 LastName  = lastName,
             },
             accessTokenExpiry);
+
+        var session = new RedisSession
+        {
+            ClientIp     = clientIp,
+
+            // identity at root
+            UserCode     = userCode,
+            Username     = username,
+            FirstName    = firstName,
+            LastName     = lastName,
+            BranchCode   = SsoAccessTokenParser.ExtractBranchCode(ssoAccessToken),
+            IsBranchUser = isBranchUser,
+
+            // raw SSO token pair + expiries
+            SsoToken = new SsoTokenData
+            {
+                AccessToken        = ssoAccessToken,
+                RefreshToken       = ssoRefreshToken,
+                AccessTokenExpiry  = accessTokenExpiry,
+                RefreshTokenExpiry = refreshTokenExpiry,
+            },
+
+            // the issued BrdpToken JWT the SPA holds
+            BrdpToken = brdpToken,
+        };
+
+        await _sessions.SaveAsync(session, ct).ConfigureAwait(false);
 
         // Browser SPA flow: when returnUrl points at a local page, redirect there
         // and hand the BrdpToken back in the URL fragment (#token=…), which never
@@ -226,25 +243,27 @@ public sealed class AuthController : ControllerBase
             {
                 // Guard: if another tab already refreshed, the session's AccessToken
                 // is already fresh — reuse it without hitting SSO again.
-                if (session.AccessTokenExpiry > DateTimeOffset.UtcNow + _authOptions.ProactiveRefreshThreshold)
+                if (session.SsoToken.AccessTokenExpiry > DateTimeOffset.UtcNow + _authOptions.ProactiveRefreshThreshold)
                 {
-                    return _brdpTokens.Issue(SessionToClaims(session), session.AccessTokenExpiry);
+                    return session.BrdpToken;
                 }
 
                 var ssoResponse = await _ssoTokens
-                    .RefreshAsync(session.SsoRefreshToken, innerCt)
+                    .RefreshAsync(session.SsoToken.RefreshToken, innerCt)
                     .ConfigureAwait(false);
 
                 if (ssoResponse is null) return null;
 
-                session.SsoAccessToken     = ssoResponse.AccessToken;
-                session.SsoRefreshToken    = ssoResponse.RefreshToken;
-                session.AccessTokenExpiry  = ssoResponse.AccessTokenExpiry;
-                session.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+                session.SsoToken.AccessToken       = ssoResponse.AccessToken;
+                session.SsoToken.RefreshToken      = ssoResponse.RefreshToken;
+                session.SsoToken.AccessTokenExpiry = ssoResponse.AccessTokenExpiry;
+                session.SsoToken.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+
+                session.BrdpToken = _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
 
                 await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
-                return _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
+                return session.BrdpToken;
             },
             ct: ct).ConfigureAwait(false);
 
@@ -257,26 +276,36 @@ public sealed class AuthController : ControllerBase
     // ── Logout ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Revokes the SSO access token, deletes the Redis session, and triggers
-    /// the OIDC end_session flow. SSO redirects the browser to <c>/auth/signed-out</c>
-    /// after completing global sign-out.
+    /// Signs out of the BFF first (revoke SSO access token, delete the Redis session,
+    /// clear the local OIDC cookie), then returns the SSO end-session URL.
+    ///
+    /// TPS SSO has no sign-out API — only a sign-out URL — so we cannot drive the OIDC
+    /// end_session flow server-side. The SPA must navigate the browser to the returned
+    /// <c>signOutUrl</c>; the SSO clears its session and redirects to
+    /// <c>SsoAuthentication:LogoutRedirectUrl</c>.
     /// </summary>
-    [HttpPost("logout")]
-    public async Task<IActionResult> Logout(CancellationToken ct = default)
+    [HttpPost("signout")]
+    public async Task<IActionResult> SignOut(CancellationToken ct = default)
     {
         var user    = _accessor.GetRequiredContext();
         var session = await _sessions.GetByUsernameAsync(user.Username, ct).ConfigureAwait(false);
 
+        // 1. Sign out of Brdp first: revoke at SSO (best-effort) + delete the session.
         if (session is not null)
         {
-            await _ssoTokens.RevokeAsync(session.SsoAccessToken, ct).ConfigureAwait(false);
+            await _ssoTokens.RevokeAsync(session.SsoToken.AccessToken, ct).ConfigureAwait(false);
             await _sessions.DeleteAsync(user.Username, ct).ConfigureAwait(false);
         }
 
-        return SignOut(
-            new AuthenticationProperties { RedirectUri = "/auth/signed-out" },
-            SsoAuthenticationDefaults.CookieScheme,
-            SsoAuthenticationDefaults.OidcScheme);
+        // 2. Clear the local OIDC cookie.
+        await HttpContext.SignOutAsync(SsoAuthenticationDefaults.CookieScheme).ConfigureAwait(false);
+
+        // 3. Hand the browser the SSO sign-out URL (DotinSso exposes a URL, not an API).
+        var signOutUrl = _ssoOptions.EndSessionEndpoint;
+        if (!string.IsNullOrWhiteSpace(_ssoOptions.LogoutRedirectUrl))
+            signOutUrl += $"?post_logout_redirect_uri={Uri.EscapeDataString(_ssoOptions.LogoutRedirectUrl)}";
+
+        return Ok(new { signOutUrl });
     }
 
     // ── SignedOut ─────────────────────────────────────────────────────────────
@@ -286,8 +315,9 @@ public sealed class AuthController : ControllerBase
     /// SSO redirects here after completing global sign-out.
     /// SPA should detect this response and navigate to the login page.
     /// </summary>
-    [HttpGet("signed-out")]
-    public IActionResult SignedOut() => Ok(new { signedOut = true });
+    [AllowAnonymous]
+    [HttpGet("signout-callback")]
+    public IActionResult SignOutCallback() => Ok(new { signedOut = true });
 
     // ── Private helpers ───────────────────────────────────────────────────────
 

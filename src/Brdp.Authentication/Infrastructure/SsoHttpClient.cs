@@ -45,23 +45,37 @@ internal sealed class SsoHttpClient
         return await PostFormAsync(_ssoOptions.TokenEndpoint, form, ct).ConfigureAwait(false);
     }
 
-    // ── UpgradeToken (Branch Selection) ──────────────────────────────────────
+    // ── UpgradeToken (TPS upgrade_token grant) ────────────────────────────────
+    // Re-issues the current access token enriched with arbitrary client_claims.
+    // Posted to the regular token endpoint with grant_type=upgrade_token, keyed by
+    // the current token's jti. Used by the reusable Token Upgrade feature (e.g. branch).
 
     public async Task<SsoTokenResponse?> UpgradeTokenAsync(
-        string accessToken, string branchCode, CancellationToken ct)
+        string accessToken, IReadOnlyDictionary<string, object?> clientClaims, CancellationToken ct)
     {
-        var endpoint = $"{_ssoOptions.Authority.TrimEnd('/')}{_ssoOptions.UpgradeTokenEndpoint}";
+        var jti = SsoAccessTokenParser.ExtractJti(accessToken);
+        if (string.IsNullOrEmpty(jti))
+        {
+            _logger.LogWarning("upgrade_token: access token has no jti claim.");
+            return null;
+        }
 
         var form = new Dictionary<string, string>
         {
-            ["grant_type"]    = "urn:ietf:params:oauth:grant-type:token-exchange",
-            ["client_id"]     = _ssoOptions.ClientId,
-            ["client_secret"] = _ssoOptions.ClientSecret,
-            ["subject_token"] = accessToken,
-            ["branch_code"]   = branchCode,
+            ["grant_type"]           = "upgrade_token",
+            ["client_id"]            = _ssoOptions.ClientId,
+            ["client_secret"]        = _ssoOptions.ClientSecret,
+            ["access_token_jti"]     = jti,
+            ["revoke_current_token"] = "false",
+            ["client_claims"]        = JsonSerializer.Serialize(clientClaims),
         };
 
-        return await PostFormAsync(endpoint, form, ct).ConfigureAwait(false);
+        // Only send scope when explicitly configured; otherwise inherit the token's scopes.
+        var scope = string.Join(' ', _ssoOptions.Scopes);
+        if (!string.IsNullOrWhiteSpace(scope))
+            form["scope"] = scope;
+
+        return await PostFormAsync(_ssoOptions.TokenEndpoint, form, ct).ConfigureAwait(false);
     }
 
     // ── Revoke ────────────────────────────────────────────────────────────────
@@ -95,8 +109,9 @@ internal sealed class SsoHttpClient
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("SSO token request to {Endpoint} returned {StatusCode}",
-                    endpoint, response.StatusCode);
+                var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                _logger.LogWarning("SSO token request to {Endpoint} returned {StatusCode}: {Body}",
+                    endpoint, response.StatusCode, body);
                 return null;
             }
 

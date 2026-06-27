@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auth Diagnostics · Dotin</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+  <style>
+    body { align-items: flex-start; padding: 24px; }
+
+    .diag-shell {
+      width: 100%;
+      max-width: 780px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ── Error header ──────────────────────────────────── */
+    .err-header {
+      background: rgba(239,68,68,.12);
+      border: 1px solid rgba(239,68,68,.35);
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .err-header svg { width: 32px; height: 32px; flex-shrink: 0; color: #ef4444; margin-top: 2px; }
+    .err-header-body { flex: 1; min-width: 0; }
+    .err-header h1   { margin: 0 0 4px; font-size: 1.1rem; font-weight: 700; }
+    .err-header p    { margin: 0; font-size: .95rem; color: #f1f5f9; line-height: 1.6; word-break: break-word; }
+    .err-code {
+      font-family: monospace;
+      font-size: .85rem;
+      background: rgba(239,68,68,.2);
+      color: #fca5a5;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(239,68,68,.3);
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    /* ── Steps list ────────────────────────────────────── */
+    .steps-card {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px;
+      padding: 18px 20px;
+    }
+    .steps-card h2 { margin: 0 0 14px; font-size: .85rem; font-weight: 700;
+                     text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .step-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+      cursor: pointer;
+    }
+    .step-row:last-child { border-bottom: none; }
+    .step-row:hover { background: rgba(255,255,255,.03); border-radius: 6px; margin: 0 -6px; padding: 10px 6px; }
+    .step-badge {
+      width: 24px; height: 24px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .72rem; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    }
+    .step-badge.done    { background: #166534; color: #86efac; }
+    .step-badge.failed  { background: #7f1d1d; color: #fca5a5; }
+    .step-badge.pending { background: #1e293b; color: #64748b; }
+    .step-content { flex: 1; }
+    .step-title { font-size: .88rem; font-weight: 600; margin-bottom: 2px; }
+    .step-title.failed { color: #f87171; }
+    .step-title.pending { color: #475569; }
+    .step-desc  { font-size: .78rem; color: var(--muted); line-height: 1.5; }
+
+    /* ── Detail panel ──────────────────────────────────── */
+    .detail-card {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .detail-card.visible { display: flex; }
+    .detail-card h3  { margin: 0; font-size: .95rem; }
+    .detail-card p   { margin: 0; font-size: .85rem; color: #cbd5e1; line-height: 1.6; }
+    .detail-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .detail-section label {
+      display: block; font-size: .72rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px;
+    }
+    .detail-section ul { margin: 0; padding-left: 16px; font-size: .82rem; color: #cbd5e1; line-height: 1.8; }
+    .log-snippet {
+      font-family: monospace; font-size: .78rem;
+      background: rgba(0,0,0,.3); color: #7dd3fc;
+      padding: 8px 12px; border-radius: 6px; word-break: break-all;
+    }
+
+    /* ── Report card ───────────────────────────────────── */
+    .report-card {
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .report-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .report-row label { font-size: .8rem; font-weight: 600; color: var(--muted); }
+    .copy-btn {
+      padding: 5px 14px; background: rgba(99,102,241,.2);
+      border: 1px solid rgba(99,102,241,.4); border-radius: 6px;
+      color: #a5b4fc; font-size: .76rem; cursor: pointer; font-family: inherit;
+    }
+    .copy-btn:hover { background: rgba(99,102,241,.35); }
+    pre { margin: 0; font-size: .76rem; color: #94a3b8; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+<div class="diag-shell">
+
+  <!-- Error header -->
+  <div class="err-header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+    </svg>
+    <div class="err-header-body">
+      <h1 id="errTitle">Authentication Error</h1>
+      <p  id="errDesc">An error occurred during the authentication flow.</p>
+    </div>
+    <span class="err-code" id="errCode">—</span>
+  </div>
+
+  <!-- Steps -->
+  <div class="steps-card">
+    <h2 id="flowLabel">Sign-In Flow</h2>
+    <div id="stepsList"></div>
+  </div>
+
+  <!-- Step detail (shown on click) -->
+  <div class="detail-card" id="detailCard">
+    <h3 id="detailTitle"></h3>
+    <p  id="detailDesc"></p>
+    <div class="detail-cols">
+      <div class="detail-section">
+        <label>Data available</label>
+        <ul id="detailAvail"></ul>
+      </div>
+      <div class="detail-section">
+        <label>What to check</label>
+        <ul id="detailCheck"></ul>
+      </div>
+    </div>
+    <div class="detail-section">
+      <label>Log pattern</label>
+      <div class="log-snippet" id="detailLog"></div>
+    </div>
+  </div>
+
+  <!-- Diagnostic report -->
+  <div class="report-card">
+    <div class="report-row">
+      <label>Diagnostic snapshot</label>
+      <button class="copy-btn" onclick="copyReport()">Copy</button>
+    </div>
+    <pre id="reportPre"></pre>
+  </div>
+
+  <div style="text-align:center;color:var(--muted);font-size:.75rem">
+    Brdp.Authentication · <a href="/index.html" style="color:inherit">Back to sign in</a>
+  </div>
+</div>
+
+<script>
+const params    = new URLSearchParams(location.search);
+const errorCode = params.get("error") || "unknown";
+const errorDesc = params.get("desc")  || null;
+const flow      = params.get("flow")  || "auth";
+const stepParam = params.get("step")  ? parseInt(params.get("step")) : null;
+const cid       = params.get("cid")   || null;
+const ts        = params.get("ts")    || new Date().toISOString();
+
+// ── Step definitions ──────────────────────────────────────────────────────────
+const AUTH_STEPS = [
+  { title: "Initiate Sign-In",
+    desc: "Browser navigates to GET /auth/signin. Gateway prepares OIDC challenge.",
+    available: ["returnUrl param", "Client IP", "X-Forwarded-For"],
+    check: ["Is the BFF gateway running?", "Is rate limiter blocking this IP?"],
+    log: "Request GET /auth/signin started" },
+  { title: "OIDC Challenge (PKCE S256)",
+    desc: "Gateway generates code_verifier + code_challenge, builds SSO authorization URL, redirects browser (302).",
+    available: ["code_challenge", "nonce", "state", "scope", "client_id", "redirect_uri"],
+    check: ["Is sso.tps.ir reachable?", "Is SSL cert trusted? (BackchannelHttpHandler)", "Are scopes accepted by SSO client?"],
+    log: "AuthenticationScheme: TpsSso was challenged" },
+  { title: "User Authenticates at SSO",
+    desc: "User enters credentials at SSO. SSO validates account and issues authorization code.",
+    available: ["SSO session (browser↔SSO only)", "Credentials (never reach gateway)"],
+    check: ["Is the user account active?", "Is client_id registered in SSO?", "Is redirect_uri whitelisted?", "Are requested scopes permitted?"],
+    log: "No gateway log — happens entirely at SSO" },
+  { title: "Auth Code → Gateway",
+    desc: "SSO posts authorization code + state to /auth/oidc-callback. OIDC middleware validates state and nonce.",
+    available: ["authorization_code", "state", "session_state"],
+    check: ["Is the state/nonce valid?", "Did correlation cookies survive?", "Is CallbackPath correct?"],
+    log: "POST /auth/oidc-callback" },
+  { title: "Token Exchange (PKCE)",
+    desc: "Gateway sends code + code_verifier to SSO token endpoint. SSO verifies PKCE and issues tokens.",
+    available: ["access_token", "refresh_token", "id_token", "expires_in", "refresh_expires_in"],
+    check: ["Is client_secret correct?", "Has the code already been used?", "Is the token endpoint reachable?"],
+    log: "OnTokenResponseReceived event fires" },
+  { title: "Store Session + Issue BrdpToken",
+    desc: "Gateway stores SSO tokens in Redis and issues HS256 BrdpToken for the SPA.",
+    available: ["Username", "UserCode", "FirstName", "LastName", "IsBranchUser", "SessionId", "AccessTokenExpiry"],
+    check: ["Is Redis reachable? (/health)", "Are user claims in the ID token?", "Is Authentication:SigningKey set?"],
+    log: "POST /auth/signin-callback → session saved" },
+  { title: "BrdpToken → Browser (fragment)",
+    desc: "Gateway redirects to returnUrl#token=…&expiresAt=… — token never reaches a server.",
+    available: ["BrdpToken (JWT)", "expiresAt (ISO-8601)", "isBranchUser"],
+    check: ["Is returnUrl a valid local URL?", "Did SPA capture the fragment?", "Is localStorage available?"],
+    log: "Request GET /auth/signin-callback completed with 302" },
+];
+
+const REFRESH_STEPS = [
+  { title: "API Request (expired BrdpToken)",
+    desc: "SPA sends request with expired BrdpToken. TokenRefreshMiddleware intercepts before auth.",
+    available: ["Authorization: Bearer <jwt>", "Token claims: sub, username, exp"],
+    check: ["Is Authorization header present?", "Does it start with 'Bearer '?"],
+    log: "TokenRefreshMiddleware: Token refresh triggered" },
+  { title: "Validate Signature (ignore expiry)",
+    desc: "Gateway validates BrdpToken signature ignoring expiry to extract username.",
+    available: ["Username", "UserCode", "Token expiry time"],
+    check: ["Is signing key the same as when token was issued?", "Was the token tampered with?"],
+    log: "BrdpTokenService.ValidateIgnoringExpiry" },
+  { title: "Acquire Redis Lock",
+    desc: "Single-flight lock per user prevents multiple SSO refresh calls for same user.",
+    available: ["Lock key: auth:lock:{sha256(username)}", "Lock TTL", "Lock timeout"],
+    check: ["Is Redis reachable?", "Is another refresh in flight (lock contention)?"],
+    log: "SessionService.ExecuteWithRefreshLockAsync" },
+  { title: "Read Session + SSO Refresh Token",
+    desc: "Gateway reads Redis session to get the SSO refresh token.",
+    available: ["SsoRefreshToken", "AccessTokenExpiry", "RefreshTokenExpiry"],
+    check: ["Does the session exist?", "Was session deleted (forced logout)?"],
+    log: "RedisSessionStore.GetByUsernameAsync" },
+  { title: "SSO Refresh Token Grant",
+    desc: "Gateway calls SSO token endpoint with grant_type=refresh_token.",
+    available: ["New access_token", "New refresh_token", "New expires_in"],
+    check: ["Is SSO refresh token expired?", "Was it already consumed?", "Is SSO token endpoint reachable?"],
+    log: "SsoTokenService.RefreshAsync" },
+  { title: "Update Session in Redis",
+    desc: "Gateway stores new SSO tokens in Redis and issues fresh BrdpToken.",
+    available: ["New SessionId", "New AccessTokenExpiry", "New RefreshTokenExpiry"],
+    check: ["Is Redis still reachable?", "Did lock expire during SSO call?"],
+    log: "SessionService.UpdateAsync" },
+  { title: "New BrdpToken → Browser",
+    desc: "Gateway sets X-New-BrdpToken response header. SPA replaces stored token.",
+    available: ["X-New-BrdpToken header", "Original API response"],
+    check: ["Is CORS exposing X-New-BrdpToken?", "Is authFetch() checking the header?"],
+    log: "TokenRefreshMiddleware: X-New-BrdpToken set" },
+];
+
+const ERROR_STEP = {
+  auth: {
+    rate_limited: 1,
+    sso_unreachable: 2, ssl_error: 2,
+    access_denied: 3, login_required: 3, interaction_required: 3,
+    unauthorized_client: 3, invalid_scope: 3, invalid_request: 3, server_error: 3,
+    state_mismatch: 4, nonce_mismatch: 4,
+    oidc_authentication_failed: 5, invalid_grant: 5,
+    "internal server error": 5, "Internal Server Error": 5,
+    session_save_failed: 6, no_token: 7, sso_error: 3,
+  },
+  refresh: {
+    missing_token: 1, invalid_token: 2, lock_timeout: 3,
+    session_not_found: 4, refresh_failed: 5, sso_error: 5,
+    session_update_failed: 6,
+  },
+};
+
+const ERROR_DESC = {
+  access_denied: "SSO rejected the request — user denied access or client is not authorized.",
+  login_required: "SSO requires the user to log in interactively (SSO session expired).",
+  invalid_request: "SSO rejected the authorization request — typically an invalid scope or redirect_uri.",
+  invalid_scope: "One or more requested scopes are not registered for this client.",
+  unauthorized_client: "This client_id is not allowed to use the requested grant type or redirect_uri.",
+  server_error: "SSO reported an internal server error.",
+  oidc_authentication_failed: "OIDC callback received but token exchange could not be completed.",
+  invalid_grant: "Authorization code or refresh token rejected — may be expired or already used.",
+  refresh_failed: "SSO refresh-token grant failed — token may be expired or already consumed.",
+  missing_token: "No Bearer token found in the Authorization header.",
+  invalid_token: "BrdpToken signature is invalid — tampered or issued with a different signing key.",
+  session_not_found: "No active session found in Redis for this user.",
+  no_token: "Gateway did not return a BrdpToken in the URL fragment.",
+  "Internal Server Error": "SSO token endpoint returned an internal server error (step 5 — code exchange).",
+};
+
+// ── Populate header ───────────────────────────────────────────────────────────
+document.getElementById("errCode").textContent = errorCode;
+document.getElementById("errDesc").textContent = errorDesc || ERROR_DESC[errorCode] || errorCode;
+if (flow === "refresh") {
+  document.getElementById("errTitle").textContent = "Token Refresh Error";
+  document.getElementById("flowLabel").textContent = "Token Refresh Flow";
+}
+
+// ── Render steps ──────────────────────────────────────────────────────────────
+const steps     = flow === "refresh" ? REFRESH_STEPS : AUTH_STEPS;
+const failedIdx = (stepParam != null ? stepParam - 1 : null) ??
+                  (ERROR_STEP[flow]?.[errorCode] != null ? ERROR_STEP[flow][errorCode] - 1 : null);
+
+const list = document.getElementById("stepsList");
+steps.forEach((s, i) => {
+  const status = failedIdx == null ? "pending"
+               : i < failedIdx ? "done"
+               : i === failedIdx ? "failed"
+               : "pending";
+  const icon = status === "done" ? "✓" : status === "failed" ? "✕" : String(i + 1);
+
+  const row = document.createElement("div");
+  row.className = "step-row";
+  row.innerHTML = `
+    <div class="step-badge ${status}">${icon}</div>
+    <div class="step-content">
+      <div class="step-title ${status}">${s.title}</div>
+      <div class="step-desc">${s.desc}</div>
+    </div>`;
+  row.addEventListener("click", () => showDetail(s, status));
+  list.appendChild(row);
+});
+
+function showDetail(s, status) {
+  document.getElementById("detailTitle").textContent = s.title;
+  document.getElementById("detailDesc").textContent  = s.desc;
+  document.getElementById("detailLog").textContent   = s.log;
+  ["detailAvail", "detailCheck"].forEach((id, idx) => {
+    const el = document.getElementById(id);
+    el.innerHTML = "";
+    (idx === 0 ? s.available : s.check).forEach(t => {
+      const li = document.createElement("li"); li.textContent = t; el.appendChild(li);
+    });
+  });
+  const card = document.getElementById("detailCard");
+  card.className = "detail-card visible";
+  card.style.borderColor = status === "failed" ? "rgba(239,68,68,.4)" : "rgba(255,255,255,.1)";
+  document.getElementById("detailTitle").style.color = status === "failed" ? "#f87171" : "";
+  card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// Auto-open the failed step detail
+if (failedIdx != null) showDetail(steps[failedIdx], "failed");
+
+// ── Diagnostic report ─────────────────────────────────────────────────────────
+const failedStep = failedIdx != null ? steps[failedIdx] : null;
+const report = [
+  "=== Brdp.Authentication Error Report ===",
+  `Timestamp  : ${ts}`,
+  `Error code : ${errorCode}`,
+  `Flow       : ${flow === "auth" ? "Sign-In (Authorization Code + PKCE)" : "Token Refresh"}`,
+  `Failed at  : ${failedStep ? `Step ${failedIdx + 1} — ${failedStep.title}` : "unknown"}`,
+  cid ? `Correlation: ${cid}` : null,
+  "",
+  "Description:",
+  `  ${errorDesc || ERROR_DESC[errorCode] || errorCode}`,
+  "",
+  failedStep ? "Log pattern to search for:" : null,
+  failedStep ? `  ${failedStep.log}` : null,
+  "",
+  failedStep ? "What to check:" : null,
+  ...(failedStep?.check.map(c => `  • ${c}`) ?? []),
+  "",
+  "=== Paste this into a support ticket ===",
+].filter(l => l !== null).join("\n");
+
+document.getElementById("reportPre").textContent = report;
+
+function copyReport() {
+  navigator.clipboard.writeText(report).then(() => {
+    const b = document.querySelector(".copy-btn");
+    b.textContent = "Copied!";
+    setTimeout(() => b.textContent = "Copy", 1800);
+  });
+}
+</script>
+</body>
+</html>

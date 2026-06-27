@@ -30,8 +30,8 @@ internal sealed class AuthenticatedUserContext : IAuthenticatedUserContext
             FirstName    = session.FirstName,
             LastName     = session.LastName,
             BranchCode   = session.BranchCode,
+            IsBranchUser = session.IsBranchUser,
             ClientIp     = session.ClientIp,
             SessionId    = session.SessionId,
-            IsBranchUser = session.IsBranchUser,
         };
 }

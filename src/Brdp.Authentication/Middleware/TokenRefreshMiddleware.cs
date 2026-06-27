@@ -41,12 +41,12 @@ public sealed class TokenRefreshMiddleware
 
     private static readonly HashSet<string> _skipPaths =
     [
-        "/auth/login",
-        "/auth/callback",
-        "/auth/signed-out",
-        "/auth/refresh-token",    // avoid recursion
-        "/signin-oidc",
-        "/signout-callback-oidc",
+        "/auth/signin",
+        "/auth/signin-callback",
+        "/auth/signout-callback",
+        "/auth/refresh-token",            // avoid recursion
+        "/auth/oidc-callback",
+        "/auth/oidc-signout-callback",
         "/health",
     ];
 
@@ -124,17 +124,17 @@ public sealed class TokenRefreshMiddleware
             {
                 // Guard: another caller may have already refreshed — check if
                 // the current session tokens are newer than what we started with.
-                if (session.AccessTokenExpiry > DateTimeOffset.UtcNow + _options.ProactiveRefreshThreshold)
+                if (session.SsoToken.AccessTokenExpiry > DateTimeOffset.UtcNow + _options.ProactiveRefreshThreshold)
                 {
                     _logger.LogDebug(
                         "Session for {Username} was already refreshed by a concurrent caller. " +
-                        "Issuing BrdpToken from current session.", claims.Username);
+                        "Returning the stored BrdpToken.", claims.Username);
 
-                    return _brdpTokens.Issue(SessionToClaims(session), session.AccessTokenExpiry);
+                    return session.BrdpToken;
                 }
 
                 var ssoResponse = await ssoTokens
-                    .RefreshAsync(session.SsoRefreshToken, innerCt)
+                    .RefreshAsync(session.SsoToken.RefreshToken, innerCt)
                     .ConfigureAwait(false);
 
                 if (ssoResponse is null)
@@ -143,14 +143,16 @@ public sealed class TokenRefreshMiddleware
                     return null;
                 }
 
-                session.SsoAccessToken     = ssoResponse.AccessToken;
-                session.SsoRefreshToken    = ssoResponse.RefreshToken;
-                session.AccessTokenExpiry  = ssoResponse.AccessTokenExpiry;
-                session.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+                session.SsoToken.AccessToken       = ssoResponse.AccessToken;
+                session.SsoToken.RefreshToken      = ssoResponse.RefreshToken;
+                session.SsoToken.AccessTokenExpiry = ssoResponse.AccessTokenExpiry;
+                session.SsoToken.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+
+                session.BrdpToken = _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
 
                 await sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
-                return _brdpTokens.Issue(SessionToClaims(session), ssoResponse.AccessTokenExpiry);
+                return session.BrdpToken;
             },
             ct: ct).ConfigureAwait(false);
     }

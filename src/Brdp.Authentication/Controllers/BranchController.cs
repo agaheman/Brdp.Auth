@@ -42,9 +42,6 @@ public sealed class BranchController : ControllerBase
 
         var user = _accessor.GetRequiredContext();
 
-        if (!user.IsBranchUser)
-            return Forbid();
-
         var result = await _branchService
             .SelectBranchAsync(user.Username, request.BranchCode, ct)
             .ConfigureAwait(false);

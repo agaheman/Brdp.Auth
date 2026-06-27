@@ -19,6 +19,9 @@ browser while letting the SPA make authenticated calls.
 | Decision | Rationale |
 |---|---|
 | SPA holds BrdpToken only | SSO tokens never reach the browser |
+| **BrdpToken in `localStorage`, sent as `Authorization: Bearer`** | Immune to CSRF (browsers never auto-send a custom header). SSO tokens are server-side so XSS impact is limited to the short BrdpToken lifetime; Redis revocation terminates the session immediately. |
+| **No cookie for BrdpToken** | A cookie for BrdpToken would require CSRF protection on every state-changing endpoint. The Authorization-header model is simpler and safer here. |
+| BrdpToken delivered in URL fragment (`#token=…`) | Fragment is never sent to a server or written to access logs; captured client-side only. |
 | Redis is session source of truth | Deleting a key invalidates the user instantly, even with a valid JWT |
 | `Expiry(BrdpToken) == Expiry(SsoAccessToken)` | No SSO-token parsing on the hot path |
 | Redis TTL = RefreshToken expiry | Session survives access-token rotation |
@@ -26,6 +29,16 @@ browser while letting the SPA make authenticated calls.
 | Single Redis read per request | Auth middleware reads once; downstream reuses the accessor |
 | Single-flight refresh (distributed lock) | Single-use SSO refresh tokens can't be double-consumed across tabs |
 | Data Protection key ring in Redis | Encrypted sessions survive restarts and scale horizontally |
+
+### Note on cookies you see during the sign-in flow
+
+The browser temporarily holds three **httpOnly OIDC handshake cookies** during the authorization-code exchange:
+
+- `.AspNetCore.OpenIdConnect.Nonce.*` — binds the ID-token nonce to this browser session
+- `.AspNetCore.Correlation.*` — binds the state parameter to this browser session
+- `.AspNetCore.TpsSsoCookie` — holds the OIDC principal between `/auth/oidc-callback` and `/auth/signin-callback`
+
+All three are set by the ASP.NET Core OIDC middleware, are httpOnly (JS-inaccessible), and are consumed and discarded during the code exchange. **They are not the BrdpToken and are not used for ongoing authentication.**
 
 ## 3. Request pipeline
 
@@ -46,7 +59,7 @@ Request
 ```
 
 It must run **after** `UseAuthentication()` (OIDC/Cookie handlers, which own the
-`/signin-oidc` callback) and **before** `MapControllers()`.
+`/auth/oidc-callback` path) and **before** `MapControllers()`.
 
 ### Authorization model
 
@@ -64,9 +77,17 @@ controller routes.
 | `BrdpTokenService` | Issue/validate HS256 BrdpTokens; supports key rotation via `PreviousSigningKeys` |
 | `SessionService` → `RedisSessionStore` | Session CRUD + distributed refresh lock (SET NX PX + Lua release) |
 | `SsoTokenService` → `SsoHttpClient` | Typed HTTP client for SSO refresh / upgrade / revoke |
-| `BranchService` | Branch-selection token upgrade (runs inside the refresh lock) |
+| `TokenUpgradeService` | Reusable Token Upgrade feature (SSO `upgrade_token` → update session → re-issue BrdpToken) |
+| `BranchService` | Branch selection — a thin use of `TokenUpgradeService` (`{ branch_code }`) |
 | `ITokenEncryptionService` | `DataProtection` (prod) or `NoOp` (dev) encryption of SSO tokens at rest |
 | `Correlation`/`TokenRefresh`/`BrdpAuthentication` middleware | Cross-cutting request handling |
+
+### Session cache layout (`auth:session:{sha256(username)}`)
+Identity at the root + two separated tokens: `ssoToken` (`SsoTokenData` — raw access/refresh
++ expiries, encrypted at rest) and `brdpToken` (the issued BrdpToken JWT the SPA holds).
+TTL = `ssoToken.refreshTokenExpiry − now`. The SSO `user_info` is parsed at login to fill the
+root identity (`userCode`, `username`, `firstName`, `lastName`, `branchCode`, `isBranchUser`)
+but is not itself stored.
 
 ## 5. Concurrency: the refresh lock
 
@@ -90,7 +111,131 @@ Both token refresh **and** branch upgrade rotate SSO tokens, so both run inside 
   401/`refresh_failed` rather than unhandled exceptions.
 - **Data Protection:** key ring persisted to Redis under `auth:dataprotection-keys`.
 
-## 7. Observability
+## 7. Complete authentication flow
+
+All routes, action names, and SPA pages involved in both flows.
+
+### Sign-in flow
+
+```
+SPA (browser)                 Gateway (BFF)                 OIDC middleware          SSO (TPS)
+─────────────────────────────────────────────────────────────────────────────────────────────────
+
+index.html
+  │  click "Sign in"
+  │──────────────────────────► GET /auth/signin
+  │                            AuthController.SignIn
+  │                            builds PKCE code_challenge
+  │                            302 → sso.tps.ir/oauth/authorize
+  │◄────────────────────────── (browser follows 302)
+  │
+  │  [user enters credentials at SSO]
+  │
+  │  SSO posts auth code ──────────────────────────────────► POST /auth/oidc-callback
+  │                                                          (OIDC middleware — CallbackPath)
+  │                                                          validates state + nonce cookies
+  │                                                          exchanges code for SSO tokens (PKCE)
+  │                                                          saves tokens into cookie
+  │                                                          302 → /auth/signin-callback
+  │◄──────────────────────────────────────────────────────── (browser follows 302)
+  │
+  │──────────────────────────► GET /auth/signin-callback
+  │                            AuthController.SignInCallback
+  │                            reads SSO tokens from cookie
+  │                            stores session → Redis
+  │                            issues BrdpToken (HS256 JWT)
+  │                            302 → /signin-complete.html#token=…&expiresAt=…
+  │◄──────────────────────────
+  ▼
+signin-complete.html
+  captures #token= from fragment
+  stores to localStorage
+  clears fragment from address bar
+  redirect → profile.html (1 s)
+  ▼
+profile.html
+  │──────────────────────────► GET /auth/userinfo
+  │                            AuthController.UserInfo
+  │◄──────────────────────────  { userCode, username, firstName, lastName,
+  │                               branchCode, sessionId, isBranchUser }
+  shows user profile
+```
+
+### Sign-out flow
+
+```
+profile.html
+  │  click "Sign out"
+  │──────────────────────────► POST /auth/signout
+  │                            AuthController.SignOut
+  │                            revokes SSO access token
+  │                            deletes Redis session (immediate logout)
+  │                            OIDC SignOut → SSO end_session
+  │
+  │  SSO global sign-out ──────────────────────────────────► GET /auth/oidc-signout-callback
+  │                                                          (OIDC middleware — SignedOutCallbackPath)
+  │                                                          clears SSO cookie
+  │                                                          302 → /auth/signout-callback
+  │◄──────────────────────────────────────────────────────── (browser follows 302)
+  │
+  │──────────────────────────► GET /auth/signout-callback
+  │                            AuthController.SignOutCallback
+  │◄──────────────────────────  { signedOut: true }
+  │
+  SPA clears localStorage
+  redirect → index.html
+```
+
+### Token refresh (transparent — no SPA action required)
+
+```
+profile.html / any page
+  │  API call with expired BrdpToken
+  │──────────────────────────► ANY endpoint
+  │                            TokenRefreshMiddleware (runs before BrdpAuthMiddleware)
+  │                            validates signature (ignores expiry)
+  │                            acquires Redis lock (single-flight per user)
+  │                            calls SSO refresh_token grant
+  │                            updates Redis session
+  │                            injects fresh token → Authorization header
+  │◄──────────────────────────  X-New-BrdpToken: <new-jwt>   (SPA replaces stored token)
+  │                             + original API response
+```
+
+### Error paths
+
+```
+ANY step fails
+  │
+  ▼
+/error.html?error=<code>&flow=auth|refresh&step=N&ts=…&cid=<correlation-id>
+  interactive sequence diagram (step in red, prior steps green, future steps grey)
+  per-step detail panel: available data · what to check · log pattern
+  one-click diagnostic report (copy to clipboard)
+```
+
+### Route reference
+
+| Route | Action | Who calls it |
+|---|---|---|
+| `GET  /auth/signin` | `AuthController.SignIn` | SPA (full-page redirect) |
+| `POST /auth/oidc-callback` | OIDC middleware (internal) | SSO (posts auth code) |
+| `GET  /auth/signin-callback` | `AuthController.SignInCallback` | OIDC middleware (302 after code exchange) |
+| `GET  /auth/userinfo` | `AuthController.UserInfo` | SPA (`authFetch`) |
+| `POST /auth/refresh-token` | `AuthController.RefreshToken` | SPA (explicit refresh) |
+| `POST /auth/signout` | `AuthController.SignOut` | SPA (`authFetch`) |
+| `GET  /auth/oidc-signout-callback` | OIDC middleware (internal) | SSO (post-logout redirect) |
+| `GET  /auth/signout-callback` | `AuthController.SignOutCallback` | OIDC middleware (302 after signout) |
+| `GET  /health` | Health check | Load balancer / readiness probe |
+
+| SPA page | Purpose | Reached from |
+|---|---|---|
+| `index.html` | Landing / sign-in button | Entry point, post-logout |
+| `signin-complete.html` | Captures BrdpToken from URL fragment | `AuthController.SignInCallback` (302) |
+| `profile.html` | Shows user data, sign-out | `signin-complete.html` (redirect) |
+| `error.html` | Auth error diagnostics + sequence diagram | `OnRemoteFailure`, `signin-complete.html`, `profile.html` |
+
+## 8. Observability
 
 Correlation has two layers (see [SPECS.md](SPECS.md) §Logging):
 

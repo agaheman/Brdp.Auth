@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Signing in… · Dotin Authentication Sample</title>
+  <title>Sign-in Complete · Dotin Authentication Sample</title>
   <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
@@ -46,13 +46,31 @@
   <script src="/assets/app.js"></script>
   <script>
     (function () {
+      // 1. SSO-side error — OnRemoteFailure redirects here with ?error=...&flow=auth
+      const params = new URLSearchParams(location.search);
+      const ssoError = params.get("error");
+      if (ssoError) {
+        // Forward to the diagnostics page with all available context
+        const diagParams = new URLSearchParams({
+          error: ssoError,
+          flow:  params.get("flow") || "auth",
+          ts:    new Date().toISOString(),
+        });
+        if (params.get("cid")) diagParams.set("cid", params.get("cid"));
+        window.location.replace("/error.html?" + diagParams);
+        return;
+      }
+
+      // 2. App-side success — BrdpToken arrives in the URL fragment
       const result = Dotin.captureTokenFromFragment();
       if (result && result.token) {
         document.getElementById("ok").classList.remove("hidden");
         setTimeout(() => { window.location.href = "/profile.html"; }, 1000);
-      } else {
-        document.getElementById("fail").classList.remove("hidden");
+        return;
       }
+
+      // 3. No token and no SSO error — gateway didn't issue a token
+      window.location.replace("/error.html?error=no_token&flow=auth&ts=" + encodeURIComponent(new Date().toISOString()));
     })();
   </script>
 </body>

@@ -34,9 +34,11 @@ Brdp.Authentication.sln
     │   ├── Extensions/     AddBrdpAuthentication (DI) + UseBrdpAuthentication (pipeline)
     │   ├── Infrastructure/ RedisSessionStore, SsoHttpClient, RedisKeyHelper
     │   ├── Middleware/     Correlation → TokenRefresh → BrdpAuthentication
-    │   ├── Models/         RedisSession, BrdpTokenClaims, SsoTokenResponse, …
+    │   ├── Models/         RedisSession (identity + ssoToken + brdpToken), SsoTokenData,
+    │   │                   BrdpTokenClaims, SsoTokenResponse, SsoUserInfo, TokenUpgradeResult, …
     │   ├── Security/       DataProtection / NoOp token encryption
-    │   └── Services/       SessionService, BrdpTokenService, BranchService, SsoTokenService
+    │   └── Services/       SessionService, BrdpTokenService, SsoTokenService,
+    │                       TokenUpgradeService, BranchService
     │
     └── Brdp.Authentication.Api/        ← ASP.NET Core host (Program.cs, appsettings.json)
 ```
