@@ -61,10 +61,19 @@ internal sealed class TokenUpgradeService : ITokenUpgradeService
                 // Persist rotated SSO tokens + any branch carried by the new token.
                 var branchCode = SsoAccessTokenParser.ExtractBranchCode(upgraded.AccessToken);
 
-                session.SsoAccessToken     = upgraded.AccessToken;
-                session.SsoRefreshToken    = upgraded.RefreshToken;
-                session.AccessTokenExpiry  = upgraded.AccessTokenExpiry;
-                session.RefreshTokenExpiry = upgraded.RefreshTokenExpiry;
+                session.SsoAccessToken    = upgraded.AccessToken;
+                session.AccessTokenExpiry = upgraded.AccessTokenExpiry;
+
+                // The upgrade_token response may omit refresh_token / refresh_expires_in.
+                // Do NOT downgrade the session: keep the existing refresh token and expiry
+                // unless the upgrade supplied valid replacements. Otherwise the session TTL
+                // (= RefreshTokenExpiry - now) computes to the past and the save is skipped,
+                // leaving the cached token un-updated.
+                if (!string.IsNullOrWhiteSpace(upgraded.RefreshToken))
+                    session.SsoRefreshToken = upgraded.RefreshToken;
+                if (upgraded.RefreshTokenExpiry > DateTimeOffset.UtcNow)
+                    session.RefreshTokenExpiry = upgraded.RefreshTokenExpiry;
+
                 if (!string.IsNullOrEmpty(branchCode))
                 {
                     session.BranchCode   = branchCode;
