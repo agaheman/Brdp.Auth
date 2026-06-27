@@ -126,16 +126,30 @@ public sealed class AuthController : ControllerBase
 
         var session = new RedisSession
         {
-            UserCode           = userCode,
-            Username           = username,
-            FirstName          = firstName,
-            LastName           = lastName,
-            IsBranchUser       = isBranchUser,
-            ClientIp           = clientIp,
-            SsoAccessToken     = ssoAccessToken,
-            SsoRefreshToken    = ssoRefreshToken,
-            AccessTokenExpiry  = accessTokenExpiry,
-            RefreshTokenExpiry = refreshTokenExpiry,
+            ClientIp = clientIp,
+
+            // SSO token half — heavy, all SSO props.
+            Sso = new SsoTokenData
+            {
+                AccessToken        = ssoAccessToken,
+                RefreshToken       = ssoRefreshToken,
+                AccessTokenExpiry  = accessTokenExpiry,
+                RefreshTokenExpiry = refreshTokenExpiry,
+                BranchCode         = SsoAccessTokenParser.ExtractBranchCode(ssoAccessToken),
+                UserInfo           = userInfo,
+            },
+
+            // API Gateway token half — minimal claims the UI uses.
+            ApiGateway = new ApiGatewayTokenData
+            {
+                UserCode     = userCode,
+                Username     = username,
+                FirstName    = firstName,
+                LastName     = lastName,
+                BranchCode   = SsoAccessTokenParser.ExtractBranchCode(ssoAccessToken),
+                IsBranchUser = isBranchUser,
+                ExpiresAt    = accessTokenExpiry,
+            },
         };
 
         await _sessions.SaveAsync(session, ct).ConfigureAwait(false);
@@ -232,21 +246,22 @@ public sealed class AuthController : ControllerBase
             {
                 // Guard: if another tab already refreshed, the session's AccessToken
                 // is already fresh — reuse it without hitting SSO again.
-                if (session.AccessTokenExpiry > DateTimeOffset.UtcNow + _authOptions.ProactiveRefreshThreshold)
+                if (session.Sso.AccessTokenExpiry > DateTimeOffset.UtcNow + _authOptions.ProactiveRefreshThreshold)
                 {
-                    return _brdpTokens.Issue(SessionToClaims(session), session.AccessTokenExpiry);
+                    return _brdpTokens.Issue(SessionToClaims(session), session.Sso.AccessTokenExpiry);
                 }
 
                 var ssoResponse = await _ssoTokens
-                    .RefreshAsync(session.SsoRefreshToken, innerCt)
+                    .RefreshAsync(session.Sso.RefreshToken, innerCt)
                     .ConfigureAwait(false);
 
                 if (ssoResponse is null) return null;
 
-                session.SsoAccessToken     = ssoResponse.AccessToken;
-                session.SsoRefreshToken    = ssoResponse.RefreshToken;
-                session.AccessTokenExpiry  = ssoResponse.AccessTokenExpiry;
-                session.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+                session.Sso.AccessToken        = ssoResponse.AccessToken;
+                session.Sso.RefreshToken       = ssoResponse.RefreshToken;
+                session.Sso.AccessTokenExpiry  = ssoResponse.AccessTokenExpiry;
+                session.Sso.RefreshTokenExpiry = ssoResponse.RefreshTokenExpiry;
+                session.ApiGateway.ExpiresAt   = ssoResponse.AccessTokenExpiry;
 
                 await _sessions.UpdateAsync(session, innerCt).ConfigureAwait(false);
 
@@ -280,7 +295,7 @@ public sealed class AuthController : ControllerBase
         // 1. Sign out of Brdp first: revoke at SSO (best-effort) + delete the session.
         if (session is not null)
         {
-            await _ssoTokens.RevokeAsync(session.SsoAccessToken, ct).ConfigureAwait(false);
+            await _ssoTokens.RevokeAsync(session.Sso.AccessToken, ct).ConfigureAwait(false);
             await _sessions.DeleteAsync(user.Username, ct).ConfigureAwait(false);
         }
 
@@ -310,10 +325,10 @@ public sealed class AuthController : ControllerBase
 
     private static BrdpTokenClaims SessionToClaims(RedisSession session) => new()
     {
-        Sub       = session.UserCode,
-        UserCode  = session.UserCode,
-        Username  = session.Username,
-        FirstName = session.FirstName,
-        LastName  = session.LastName,
+        Sub       = session.ApiGateway.UserCode,
+        UserCode  = session.ApiGateway.UserCode,
+        Username  = session.ApiGateway.Username,
+        FirstName = session.ApiGateway.FirstName,
+        LastName  = session.ApiGateway.LastName,
     };
 }
